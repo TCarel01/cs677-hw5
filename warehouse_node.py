@@ -183,7 +183,7 @@ class Warehouse:
         try:
             self.send_msg(reply, dest=msg["sender"])
         except:
-            print(f"{datetime.now()}, {msg["uid"]}, Leader {msg["sender"]} detected to have gone down from warehouse, resending buy reply to a new leader")
+            print(f"{datetime.now()}, {msg['uid']}, Leader {msg['sender']} detected to have gone down from warehouse, resending buy reply to a new leader")
             self.leader_ids.remove(msg["sender"])
             msg_sender = random.choice(list(self.leader_ids))
             self.send_msg(reply, msg_sender)
@@ -212,7 +212,7 @@ class Warehouse:
         try:
             self.send_msg(reply, dest=msg["sender"])
         except:
-            print(f"{datetime.now()}, {msg["uid"]}, Leader {msg["sender"]} detected to have gone down from warehouse, resending restock reply to a new leader")
+            print(f"{datetime.now()}, {msg['uid']}, Leader {msg['sender']} detected to have gone down from warehouse, resending restock reply to a new leader")
             self.leader_ids.remove(msg["sender"])
             msg_sender = random.choice(list(self.leader_ids))
             self.send_msg(reply, msg_sender)

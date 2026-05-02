@@ -36,8 +36,8 @@ class P2PNode:
                  nodes: Dict[int, int],  # keys are IDs, vals are ports
                  warehouse_port: int,  # Just the port
                  num_traders: int,
-                 shopping_list: list[Dict] = None,
-                 selling_list: list[Dict] = None,
+                 shopping_list: list[Dict] | None = None,
+                 selling_list: list[Dict] | None = None,
                  synchronized:bool = False,
                  leader_time_to_die=None
                  ):
@@ -195,15 +195,15 @@ class P2PNode:
                 else:
                     if msg["quantity"] == 0:
                         if msg["passed_cache"]:
-                            print(f"{datetime.now()}, {msg["uid"]}, made by node {self.id} to buy {msg["item"]} failed. Inventory for {msg["item"]} depleted.")
+                            print(f"{datetime.now()}, {msg['uid']}, made by node {self.id} to buy {msg['item']} failed. Inventory for {msg['item']} depleted.")
                         else:
                             print(
-                                f"{datetime.now()}. {msg["uid"]}, made by node {self.id} to buy {msg["item"]} failed. Inventory for {msg["item"]} expected to be depleted.")
+                                f"{datetime.now()}. {msg['uid']}, made by node {self.id} to buy {msg['item']} failed. Inventory for {msg['item']} expected to be depleted.")
                     else:
                         print(
-                            f"{datetime.now()}, {msg["uid"]}, succeeded. Node {self.id} purchased {msg["quantity"]} {msg["item"]}")
+                            f"{datetime.now()}, {msg['uid']}, succeeded. Node {self.id} purchased {msg['quantity']} {msg['item']}")
             case enums.MsgType.RESTOCK_REPLY.name:
-                print(f"{datetime.now()}, {msg["uid"]}, made by node {msg["peer_id"]} succeeded. Inventory restocked with {msg["quantity"]} {msg["item"]}")
+                print(f"{datetime.now()}, {msg['uid']}, made by node {msg['peer_id']} succeeded. Inventory restocked with {msg['quantity']} {msg['item']}")
             case enums.MsgType.SYNC_DATA.name:
                 self.locks["REPLICATED_LOCK"].acquire()
                 self.replicated_totals = msg["totals"]
