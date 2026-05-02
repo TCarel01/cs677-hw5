@@ -4,6 +4,8 @@ import math
 import pickle
 import random
 import socket
+from xmlrpc.client import DateTime
+
 import select
 import time
 import threading
@@ -34,6 +36,10 @@ class P2PNode:
                  nodes: Dict[int, int],  # keys are IDs, vals are ports
                  warehouse_port: int,  # Just the port
                  num_traders: int,
+                 shopping_list: list[Dict] = None,
+                 selling_list: list[Dict] = None,
+                 synchronized:bool = False,
+                 leader_time_to_die=None
                  ):
         """
         Initializes node by recording whether each node is a buyer or a seller,
@@ -53,9 +59,16 @@ class P2PNode:
         # Role details
         self.is_buyer = is_buyer
         self.is_seller = is_seller
+        self.leader_time_to_die = leader_time_to_die
+        # Further peer attributes
+        self.next_buy_ts = datetime.now() + timedelta(0, random.randint(1, 10))  # days, seconds
+        self.next_restock_ts = datetime.now() + timedelta(0, random.randint(12, 15))  # days, seconds
+        self.restock_qty = 20 # amount of items a peer stocks the warehouse with. Set to a consistent number
+        self.synchronized = synchronized
         if is_buyer and is_seller:
             raise Exception  # This shouldn't happen, per assignment instructions
         self.is_leader = False
+        self.replicated_totals = {enums.Item.SALT.name: 0, enums.Item.BOAR.name: 0, enums.Item.FISH.name: 0}
         # Network details
         self.nodes = nodes
         self.warehouse_port = warehouse_port
@@ -68,6 +81,9 @@ class P2PNode:
             BOAR = 0,
             FISH = 0,
         )
+        # testing attributes
+        self.shopping_list = shopping_list
+        self.selling_list = selling_list
 
     def start(self):
         """
@@ -83,6 +99,11 @@ class P2PNode:
         self.server_socket.listen(100000)
         # Set up lock (only have one for simplicity, if adding a second one be VERY careful)
         self.tx_lock = threading.Lock()
+        # Locks which will only be acquired in a testing environment
+        self.locks["SELLING_LIST"] = threading.Lock()
+        self.locks["SHOPPING_LIST"] = threading.Lock()
+        self.locks["REPLICATED_LOCK"] = threading.Lock()
+
         # Start run loop (after waiting 5 seconds so all nodes are online)
         time.sleep(5)
         self.running = True
@@ -98,6 +119,7 @@ class P2PNode:
         print(f"{datetime.now()}, status, node {self.id} stopping")
         self.running = False
         self.server_socket.close()
+        time.sleep(5)
         return
     
     def run_loop(self):
@@ -137,6 +159,8 @@ class P2PNode:
                     break
                 else:
                     executor.submit(self.handle_msg, msg)
+                if self.leader_time_to_die is not None and datetime.now() > self.leader_time_to_die:
+                    self.stop()
         return
     
     def handle_msg(self, msg:dict):
@@ -150,17 +174,147 @@ class P2PNode:
                 pass
             case enums.ElecMsgType.IWON.name:
                 self.youwon(msg)
+            # Entered when a leader requests a restock, forward the message to the warehouse
+            case enums.MsgType.RESTOCK.name:
+                self.forward_transaction(msg)
+            # Entered when a note requests to purchase an item, forward the message to the warehouse
+            case enums.MsgType.BUY.name:
+                forward_transaction = True
+                if not self.synchronized:
+                    self.locks["REPLICATED_LOCK"].acquire()
+                    forward_transaction = self.replicated_totals[msg["item"]] != 0
+                    self.locks["REPLICATED_LOCK"].release()
+                if forward_transaction:
+                    self.forward_transaction(msg)
+                else:
+                    self.reject_purchase_insufficient_cache(msg)
+            # Entered when the warehouse sends a response indicating the buy went through.
+            case enums.MsgType.BUY_REPLY.name:
+                if self.is_leader:
+                    self.peer_buy_reply(msg)
+                else:
+                    if msg["quantity"] == 0:
+                        if msg["passed_cache"]:
+                            print(f"{datetime.now()}, {msg["uid"]}, made by node {self.id} to buy {msg["item"]} failed. Inventory for {msg["item"]} depleted.")
+                        else:
+                            print(
+                                f"{datetime.now()}. {msg["uid"]}, made by node {self.id} to buy {msg["item"]} failed. Inventory for {msg["item"]} expected to be depleted.")
+                    else:
+                        print(
+                            f"{datetime.now()}, {msg["uid"]}, succeeded. Node {self.id} purchased {msg["quantity"]} {msg["item"]}")
+            case enums.MsgType.RESTOCK_REPLY.name:
+                print(f"{datetime.now()}, {msg["uid"]}, made by node {msg["peer_id"]} succeeded. Inventory restocked with {msg["quantity"]} {msg["item"]}")
+            case enums.MsgType.SYNC_DATA.name:
+                self.locks["REPLICATED_LOCK"].acquire()
+                self.replicated_totals = msg["totals"]
+                self.locks["REPLICATED_LOCK"].release()
+
+
         return
-    
+
+    def buy(self):
+        """
+        Request made by peer when attempting to purchase an item
+        """
+        uid = uuid.uuid4()
+        if self.shopping_list is not None and len(self.shopping_list) > 0:
+            self.locks["SHOPPING_LIST"].acquire()
+            item_quantity_dict = self.shopping_list.pop()
+            item = list(item_quantity_dict.keys())[0]
+            quantity = item_quantity_dict[item]
+            self.locks["SHOPPING_LIST"].release()
+        else:
+            item = random.choice(list(enums.Item)).name
+            quantity = random.choice(range(1, 10))
+
+        print(f"{datetime.now()}, {uid}, node {self.id} is buying {item}")
+        outgoing_msg = enums.TxMsg(uid=uid,
+                                   sender=self.id,
+                                   type=enums.MsgType.BUY.name,
+                                   item=item,
+                                   quantity=quantity).to_dict()
+
+        chosen_trader = random.choice(list(self.traders.keys()))
+        # try catch block, for fault tolerance implementation pater
+        try:
+            self.send_msg(outgoing_msg, chosen_trader)
+        except:
+            # if we've entered here, one of our leaders has failed. Remove leader from leader set and pick another
+            print(f"{datetime.now()}, {uid}. Node {self.id} failed to reach leader when purchasing. Retrying to purchase {item} with a new chosen trader")
+            self.traders.pop(chosen_trader)
+            chosen_trader = random.choice(list(self.traders.keys()))
+            self.send_msg(outgoing_msg, chosen_trader)
+        finally:
+            self.next_buy_ts = datetime.now() + timedelta(0, 5)
+        return
+
+
+    def restock(self):
+        """
+        Request made by peer when attempting to restock the warehouse
+        """
+        uid = uuid.uuid4()
+        # Either pick random item and quantity, or get them from the selling list
+        if self.selling_list is not None and len(self.selling_list) > 0:
+            self.locks["SELLING_LIST"].acquire()
+            item_quantity_dict = self.selling_list.pop()
+            item = list(item_quantity_dict.keys())[0]
+            self.locks["SELLING_LIST"].release()
+        else:
+            item = random.choice(list(enums.Item)).name
+        print(f"{datetime.now()}, {uid}, node {self.id} is restocking {item}")
+
+        # Send request to the warehouse node
+        outgoing_msg = enums.TxMsg(uid=uid,
+                                   sender=self.id,
+                                   type=enums.MsgType.RESTOCK.name,
+                                   item=item,
+                                   quantity=self.restock_qty).to_dict()
+
+        chosen_trader = random.choice(list(self.traders.keys()))
+        # try catch block, for fault tolerance implementation pater
+        try:
+            self.send_msg(outgoing_msg, chosen_trader)
+        except:
+            print(f"{datetime.now()}, {uid} Node {self.id} failed to reach leader when restocking. Retrying to restock {item} with a new chosen trader")
+            self.traders.pop(chosen_trader)
+            chosen_trader = random.choice(list(self.traders.keys()))
+            self.send_msg(outgoing_msg, chosen_trader)
+
+        self.next_restock_ts = datetime.now() + timedelta(0, 20)
+
+    def forward_transaction(self, msg:dict):
+        """
+        To be called by leaders only, forwards the transaction request message to the warehouse
+        """
+        # FIXME implement checking local cache for requests
+        msg["passed_cache"] = True
+        msg["peer_id"] = msg["sender"]
+        msg["sender"] = self.id
+        self.send_msg(msg, self.warehouse_port, True)
+
+    def peer_buy_reply(self, msg:dict):
+        peer_id = msg["peer_id"]
+        msg["sender"] = self.id
+        self.send_msg(msg, peer_id, False)
+
+    def reject_purchase_insufficient_cache(self, msg:dict):
+        msg["quantity"] = 0
+        peer = msg["sender"]
+        msg["sender"] = self.id
+        msg["type"] = enums.MsgType.BUY_REPLY.name
+        self.send_msg(msg, peer, False)
+
+
     def election_logic(self):
         """
         When we start, elect nodes as trader.
         """
-        if self.num_traders < len(self.traders.keys()):
+        if len(self.traders.keys()) < self.num_traders:
             # FIXME: for now we simulate bully alg by having nodes with highest
             # IDs be leader, but we're not actually holding an election.
             print("FIXME later: actually implement elections")
-            leader_min = max(list(self.nodes.keys()) + [self.id]) - self.num_traders + 
+            leader_min = max(list(self.nodes.keys()) + [self.id]) - self.num_traders + 1
             if self.id >= leader_min:
                 self.is_leader = True
                 self.iwon()
@@ -178,7 +332,7 @@ class P2PNode:
         uid = uuid.uuid4()
         msg = enums.ElectMsg(uid=uid, sender=self.id, type=enums.ElecMsgType.IWON.name)
         for nid in self.nodes.keys():
-            self.send_msg(msg.to_dict(), self.nodes[nid])
+            self.send_msg(msg.to_dict(), nid)
         return
 
     def elect(self):
@@ -215,9 +369,15 @@ class P2PNode:
         """
         Logic that non-leaders gro through in run_loop.
         """
+        if self.is_seller:
+            if datetime.now() > self.next_restock_ts:
+                self.restock()
+        if self.is_buyer:
+            if datetime.now() > self.next_buy_ts:
+                self.buy()
         return
     
-    def send_msg(self, msg:dict, dest:int):
+    def send_msg(self, msg:dict, dest:int, send_to_warehouse:bool=False):
         """
         Sends outgoing msgs to dest.
         We also need to handle fault tolerance in case a trader goes
@@ -225,13 +385,11 @@ class P2PNode:
         """
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as node_socket:
-                dest_port = self.nodes[dest]
+                dest_port = self.nodes[dest] if not send_to_warehouse else self.warehouse_port
                 node_socket.connect((socket.gethostname(), dest_port))
                 serialized_msg = pickle.dumps(msg, -1)  # -1 is used to pick best representation
                 node_socket.sendall(serialized_msg)
-        except Exception as e:
-            print(f"Haven't implemented fault tolerance for nodes")
-            raise Exception
         finally:
             node_socket.close()
         return
+

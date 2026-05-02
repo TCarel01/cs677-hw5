@@ -10,7 +10,6 @@ class Role(Enum):
     """Defines types of nodes."""
     BUYER = 0
     SELLER = 1
-    BUYER_AND_SELLER = 2
 
 class Item(Enum):
     """Defines types of nodes."""
@@ -26,6 +25,7 @@ class MsgType(Enum):
     RESTOCK_REPLY = 3  # Msg from warehouse to trader to node, accepting or denying sell.
     UPDATE = 4  # Msg from trader to warehouse sending an update to inventory.
     UPDATE_REPLY = 5  # Msg from warehouse to trader indicating if update was accepted.
+    SYNC_DATA = 6 # Eventual consistency implementation, sending the current totals to the leaders.
 
 class ElecMsgType(Enum):
     """Defines election msg types."""
@@ -50,13 +50,15 @@ class ActionStatus(Enum):
 
 
 class TxMsg:
-    def __init__(self, uid, sender: int, type: str, item: str, quantity: int):
+    def __init__(self, uid, sender: int, type: str, item: str, quantity: int, peer_id:int=None, passed_cache:bool=False):
         self.uid = uid
         self.sender = sender
         self.type = type
         self.item = item
         self.quantity = quantity
         self.is_done = False
+        self.peer_id = peer_id
+        self.passed_cache = passed_cache
     
     def to_dict(self) -> dict:
         d = dict(
@@ -65,6 +67,8 @@ class TxMsg:
             type = self.type,
             item = self.item,
             quantity = self.quantity,
+            peer_id = self.peer_id,
+            passed_cache = self.passed_cache
         )
         return d
     

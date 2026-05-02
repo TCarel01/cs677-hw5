@@ -3,12 +3,16 @@ import random
 import socket
 import sys
 import time
+from datetime import datetime, timedelta
 from multiprocessing import Process
 import threading
 import enums
 
 import p2p_node as p2p
 import warnings
+
+import warehouse_node
+
 warnings.simplefilter(action='ignore', category=FutureWarning)
 from pathlib import Path
 
@@ -16,6 +20,49 @@ from pathlib import Path
 def custom_hook(args):
     print(f"Thread failed: {args.exc_type.__name__}: {args.exc_value}")
 threading.excepthook = custom_hook
+
+def make_random_network(num_nodes: int, start_port, num_traders:int, synchronous=False) -> dict[int, p2p.P2PNode]:
+    """
+    Creates a random network of nodes, with random roles.
+    Returns dict, whose keys are ports and whose values are the nodes.
+    """
+    # Start by defining the port for each node.
+    network = dict()
+    node_ports = {i:start_port+i for i in range(0, num_nodes)}
+    # Iterate through to initialize all nodes.
+    warehouse_port = 0
+    for id in range(num_nodes):
+        leader_time_to_die = None
+        curr_port_number = node_ports[id]
+        if id == 0:
+            warehouse_port = curr_port_number - 1
+            wh_node = warehouse_node.Warehouse(id=num_nodes,
+                                               port=warehouse_port,
+                                               nodes=node_ports,
+                                               synchronous=synchronous)
+            network[warehouse_port] = wh_node
+        if id == num_nodes - 1 and not synchronous:
+            leader_time_to_die = datetime.now() + timedelta(0, 40)
+        curr_port_number = node_ports[id]
+        role = random.choice(list(enums.Role)).name
+        # Give this node a list of all node ports except its own.
+        node_view_of_network = node_ports.copy()
+        del node_view_of_network[id]
+        # Three possible roles, BUYER, SELLER, and BUYER_AND_SELLER. These are passed to
+        # the node via the following two bools.
+        is_buyer = (True if role in [enums.Role.BUYER.name] else False)
+        is_seller = (True if role in [enums.Role.SELLER.name] else False)
+        network[curr_port_number] = p2p.P2PNode(id=id,
+                                                port_number=curr_port_number,
+                                                is_buyer=is_buyer,
+                                                is_seller=is_seller,
+                                                nodes=node_view_of_network,
+                                                warehouse_port=warehouse_port,
+                                                num_traders = num_traders,
+                                                synchronized=synchronous,
+                                                leader_time_to_die=leader_time_to_die
+                                                )
+    return network
 
 
 def run_network(network: dict[int, p2p.P2PNode], run_time:int, stop_network:bool=True):
@@ -53,16 +100,17 @@ def run_network(network: dict[int, p2p.P2PNode], run_time:int, stop_network:bool
 
 
 if __name__ == "__main__":
-    num_nodes = int(sys.argv[1])
+    # num_nodes = int(sys.argv[1])
 
-    if type(num_nodes) is not int or num_nodes < 6:
-        print("please pass an integer greater than 5")
-        exit(1)
-    start_port = 49152
-    #network = make_random_network(num_nodes=num_nodes, start_port=start_port)
-    # for
-    #run_network(network=network, run_time=10000)
-    pass
+    # FIXME: remove debug statement
+    num_nodes = 10
+
+    # if type(num_nodes) is not int or num_nodes < 6:
+    #     print("please pass an integer greater than 5")
+    #     exit(1)
+    start_port = 49153
+    network = make_random_network(num_nodes=num_nodes, start_port=start_port, num_traders=4, synchronous=False)
+    run_network(network=network, run_time=10000)
 
 
 
