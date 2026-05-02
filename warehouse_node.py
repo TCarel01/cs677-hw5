@@ -30,7 +30,7 @@ class Warehouse:
     def __init__(self, id:int, port:int, nodes:dict[int, int], synchronous=False):
         # Set up node properties
         self.id = id
-        self.port = port
+        self.port_number = port
         self.running = False
         self.synchronous = synchronous
         # Set up objects for communication
@@ -58,7 +58,7 @@ class Warehouse:
         self.server_socket = socket.socket()
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.server_socket.settimeout(100)  # Time out so we can gracefully exit once we stop seeing messages.
-        self.server_socket.bind((socket.gethostname(), self.port))
+        self.server_socket.bind((socket.gethostname(), self.port_number))
         self.server_socket.listen(100000)
         # set up locks
         self.locks = dict(
@@ -69,7 +69,7 @@ class Warehouse:
         )
         # Start running
         self.running = True
-        print(f"{datetime.now()}, warehouse, node {self.id} start on port {self.port}")
+        print(f"{datetime.now()}, warehouse, node {self.id} start on port {self.port_number}")
         self.run_loop()
         return
     

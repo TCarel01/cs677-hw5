@@ -28,21 +28,7 @@ def recieve_msg(my_socket:socket.socket):
     msg = pickle.loads(data)
     return msg
 
-def dict_to_network(node_dict: dict, warehouse_port: int, num_traders: int):
-    nodes = dict()
-    network_dict = {nid: node_dict[nid]["port"] for nid in node_dict.keys()}
-    for nid in node_dict.keys():
-        port = node_dict[nid]["port"]
-        n = p2p.P2PNode(id=nid,
-                        port_number=port,
-                        is_buyer=node_dict[nid]["is_buyer"],
-                        is_seller=node_dict[nid]["is_seller"],
-                        nodes=network_dict,
-                        warehouse_port=warehouse_port,
-                        num_traders=num_traders,
-                        )
-        nodes[nid] = n
-    return nodes
+
 
 class TestWarehouse(unittest.TestCase):
     def setUp(self):
@@ -206,35 +192,50 @@ class TestWarehouse(unittest.TestCase):
                               peer_id=None)
         self.assertDictEqual(b2_reply, expected_reply)
         return
-    
+
+
 class TestTrader(unittest.TestCase):
+    synchronized = True
     def setUp(self):
         """
-        Start up warehouse node and create port
-        for it to talk to.
+        Start up trader node and create fake node and
+        warehouse ports for it to talk to.
         """
-        # Set up simple node network
-        self.test_id = 0
-        self.test_port = 49152
-        self.wh_port = 49153
-        wh_node = warehouse_node.Warehouse(id=1,
-                                           port=self.wh_port,
-                                           nodes={self.test_id: self.test_port})
-        # Set up test socket for warehouse node to send msgs to
-        self.socket = socket.socket()
-        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.socket.settimeout(100)  # Time out so we can gracefully exit once we stop seeing messages.
-        self.socket.bind((socket.gethostname(), self.test_port))
-        self.socket.listen(100000)
-        # set up thread testing
+        self.node_id = 0
+        self.node_port = 49152
+        self.trader_id = 1
+        self.trader_port = 49153
+        self.warehouse_id = 2
+        self.warehouse_port = 49154
+        # Set up trader node. Manually set it as a leader
+        trader_node = p2p.P2PNode(id=self.trader_id, port_number=self.trader_port,
+                                  is_buyer=True, is_seller=False,
+                                  warehouse_port=self.warehouse_port,
+                                  nodes={self.node_id: self.node_port},
+                                  num_traders=1, synchronized=self.synchronized)
+        trader_node.is_leader = True
+        trader_node.is_electing = False
+        # Set up test node socket for trader node to send msgs to
+        self.node_socket = socket.socket()
+        self.node_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.node_socket.settimeout(100)  # Time out so we can gracefully exit once we stop seeing messages.
+        self.node_socket.bind((socket.gethostname(), self.node_port))
+        self.node_socket.listen(100000)
+        # Set up test warehouse socket for trader node to send msgs to
+        self.wh_socket = socket.socket()
+        self.wh_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.wh_socket.settimeout(100)  # Time out so we can gracefully exit once we stop seeing messages.
+        self.wh_socket.bind((socket.gethostname(), self.warehouse_port))
+        self.wh_socket.listen(100000)
+        # set up testing either using threads or processes
         use_process = False            
         self.thread_executor = ThreadPoolExecutor(max_workers=100)
         if use_process:
-            p = Process(target=wh_node.start,)
+            p = Process(target=trader_node.start,)
             p.start()
         else:
-            self.thread_executor.submit(wh_node.start)
-        # Wait a few seconds so warehouse has time to start
+            self.thread_executor.submit(trader_node.start)
+        # Wait a few seconds so nodes have time to start
         time.sleep(5)
         return
     
@@ -244,41 +245,59 @@ class TestTrader(unittest.TestCase):
         Also shut down thread executory.
         """
         stop_msg = dict(type=enums.ControlMsgType.STOP.name)
-        send_msg(stop_msg, dest_port=self.wh_port)
-        self.socket.close()
+        send_msg(stop_msg, dest_port=self.trader_port)
+        time.sleep(1)  # time for trader to finish sending any outgoing messages before stopping
+        self.node_socket.close()
+        self.wh_socket.close()
         self.thread_executor.shutdown()
         return
     
-    def send_rcv_msg(self, uid, type, item, quantity):
+    def node_send_msg(self, uid, type, item, quantity):
         """
-        Send msg to warehouse and get reply back.
+        Send msg to trader.
         """
-        # Send request to the warehouse node
+        # Send request to the trader node
         outgoing_msg = enums.TxMsg(uid=uid,
-                                   sender=self.test_id,
+                                   sender=self.node_id,
                                    type=type,
                                    item=item,
                                    quantity=quantity).to_dict()
-        send_msg(outgoing_msg, dest_port=self.wh_port)
-        # Receive reply from warehouse
-        msg = recieve_msg(self.socket)
-        return msg
+        send_msg(outgoing_msg, dest_port=self.trader_id)
+        return
     
-    def test_elected_leaders(self):
-        node_dict = {
-            2: dict(id=2, port=self.test_port+2, is_seller=True, is_buyer=False),
-            3: dict(id=3, port=self.test_port+3, is_seller=True, is_buyer=False),
-            4: dict(id=4, port=self.test_port+4, is_seller=False, is_buyer=True),
-            5: dict(id=5, port=self.test_port+5, is_seller=False, is_buyer=True),
-        }
-        network = dict_to_network(node_dict=node_dict, warehouse_port=self.wh_port, num_traders=2)
+    def warehouse_send_msg(self, uid, type, item, quantity):
+        # Send request reply to the trader node
+        outgoing_msg = enums.TxMsg(uid=uid,
+                                   sender=self.warehouse_id,
+                                   type=type,
+                                   item=item,
+                                   quantity=quantity,
+                                   peer_id=self.node_id,
+                                   passed_cache=True).to_dict()
+        send_msg(outgoing_msg, dest_port=self.trader_id)
+        return
+    
+    def test_buy_is_fwded(self):
+        uid = uuid.uuid4()
+        self.node_send_msg(uid=uid, type=enums.MsgType.BUY.name, item=enums.Item.SALT.name, quantity=5)
+        reply_msg = recieve_msg(self.wh_socket)
+        expected_reply = dict(uid=uid,
+                              sender=self.trader_id,
+                              type=enums.MsgType.BUY.name,
+                              item=enums.Item.SALT.name,
+                              quantity=5,
+                              peer_id=self.node_id,
+                              passed_cache=True)
+        self.assertDictEqual(reply_msg, expected_reply)
+        return
         
 
 
 
 if __name__ == "__main__":
     #unittest.main()
-    #warehouse_suite = unittest.TestLoader().loadTestsFromTestCase(TestWarehouse)
+    warehouse_suite = unittest.TestLoader().loadTestsFromTestCase(TestWarehouse)
     trader_suite = unittest.TestLoader().loadTestsFromTestCase(TestTrader)
+    #unittest.TextTestRunner().run(warehouse_suite)
     unittest.TextTestRunner().run(trader_suite)
 

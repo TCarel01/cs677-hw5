@@ -50,7 +50,7 @@ class ActionStatus(Enum):
 
 
 class TxMsg:
-    def __init__(self, uid, sender: int, type: str, item: str, quantity: int, peer_id:int=None, passed_cache:bool=False):
+    def __init__(self, uid, sender: int, type: str, item: str, quantity: int, peer_id:int | None=None, passed_cache:bool=False):
         self.uid = uid
         self.sender = sender
         self.type = type
