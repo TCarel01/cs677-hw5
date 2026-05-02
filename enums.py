@@ -77,15 +77,17 @@ class TxMsg:
         return self
 
 class ElectMsg:
-    def __init__(self, uid, sender: int, type: str):
+    def __init__(self, uid, sender: int, type: str, epoch: int):
         self.sender = sender
         self.uid = uid
         self.type = type
+        self.epoch = epoch
     
     def to_dict(self) -> dict:
         d = dict(
             sender = self.sender,
             uid = self.uid,
             type = self.type,
+            epoch = self.epoch,
         )
         return d

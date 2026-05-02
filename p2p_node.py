@@ -55,7 +55,12 @@ class P2PNode:
         self.running = None
         self.tx_lock = None  # This lock is ONLY used when we change to self.tx. Should be locked for 1 line of code at a time.
         self.tx = list()
+        # Needed for election logic
         self.is_electing = True  # Used to keep us in election loop on startups, but not when a trader goes down.
+        self.election_epoch = 0  # Incremented when declaring IWON, or receiving IWON
+        self.last_ELECT_epoch = -1
+        self.last_ELECT_ts = datetime.now()
+        self.is_up_for_election = False
         # Role details
         self.is_buyer = is_buyer
         self.is_seller = is_seller
@@ -157,6 +162,11 @@ class P2PNode:
                 if msg["type"] == enums.ControlMsgType.STOP.name:
                     self.stop()
                     break
+                elif msg["type"] in [m.name for m in enums.ElecMsgType]:
+                    # Handle election messages one at a time, as we gain little
+                    # from handling these concurrently (since they come one at a time
+                    # anyways) and it would come at the expense of much complexity (locking)
+                    self.handle_msg(msg)
                 else:
                     executor.submit(self.handle_msg, msg)
                 if self.leader_time_to_die is not None and datetime.now() > self.leader_time_to_die:
@@ -171,7 +181,8 @@ class P2PNode:
             case enums.ElecMsgType.ELECT.name:
                 self.okay(msg)
             case enums.ElecMsgType.OKAY.name:
-                pass
+                if msg["epoch"] == self.election_epoch:
+                    self.is_up_for_election = False
             case enums.ElecMsgType.IWON.name:
                 self.youwon(msg)
             # Entered when a leader requests a restock, forward the message to the warehouse
@@ -310,18 +321,19 @@ class P2PNode:
         """
         When we start, elect nodes as trader.
         """
-        if len(self.traders.keys()) < self.num_traders:
-            # FIXME: for now we simulate bully alg by having nodes with highest
-            # IDs be leader, but we're not actually holding an election.
-            print("FIXME later: actually implement elections")
-            leader_min = max(list(self.nodes.keys()) + [self.id]) - self.num_traders + 1
-            if self.id >= leader_min:
-                self.is_leader = True
+        if self.election_epoch < self.num_traders:
+            # Start elections until we have enough traders
+            if self.last_ELECT_epoch < self.election_epoch:
+                # Only start an election when we enter a new epoch (after a leader is found)
+                # and if we're not already a leader
+                if not self.is_leader:
+                    self.elect()
+                self.last_ELECT_epoch += 1
+            elif self.is_up_for_election and datetime.now() > self.last_ELECT_ts + timedelta(0, 5):
+                # If we've started an election and haven't gotten an OKAY for five seconds, declare victory
                 self.iwon()
-                self.traders[self.id] = self.port_number
-            else:
-                time.sleep(1)
         else:
+            # Once we have enough traders, we're done with electing phase
             self.is_electing = False
         return
     
@@ -329,25 +341,45 @@ class P2PNode:
         """
         Send out iwon message.
         """
+        print(f"{datetime.now()}, election, node {self.id} won election in epoch {self.election_epoch}")
         uid = uuid.uuid4()
-        msg = enums.ElectMsg(uid=uid, sender=self.id, type=enums.ElecMsgType.IWON.name)
+        msg = enums.ElectMsg(uid=uid, sender=self.id, type=enums.ElecMsgType.IWON.name, epoch=self.election_epoch)
+        self.election_epoch += 1
         for nid in self.nodes.keys():
             self.send_msg(msg.to_dict(), nid)
+        self.is_leader = True
+        self.is_up_for_election = False
+        #self.traders[self.id] = self.nodes[self.id]  # Structuring it this way let's us avoid locks on self.traders
         return
 
     def elect(self):
         """
         Send out elect msgs.
         """
+        print(f"{datetime.now()}, election, node {self.id} starting election in epoch {self.election_epoch}")
+        uid = uuid.uuid4()
+        msg = enums.ElectMsg(uid=uid, sender=self.id, type=enums.ElecMsgType.ELECT.name, epoch=self.election_epoch).to_dict()
+        for nid in self.nodes.keys():
+            if nid > self.id:
+                self.send_msg(msg=msg, dest=nid, send_to_warehouse=False)
+        self.is_up_for_election = True
+        self.last_ELECT_ts = datetime.now()
         return
     
     def okay(self, msg):
         """
         Send out okay msg if needed.
         """
-        if msg["sender"] < self.id:
-            pass
+        if msg["epoch"] < self.election_epoch:
+            # If this message is from an old epoch, we alreayd have a winner for that eleciton, so we send an OKAY
+            reply_msg = enums.ElectMsg(uid=msg["uid"], sender=self.id, type=enums.ElecMsgType.OKAY.name, epoch=msg["epoch"]).to_dict()
+            self.send_msg(msg=reply_msg, dest=msg["sender"], send_to_warehouse=False)
+        elif not self.is_leader:
+            # If we're not a leader, send an OKAY
+            reply_msg = enums.ElectMsg(uid=msg["uid"], sender=self.id, type=enums.ElecMsgType.OKAY.name, epoch=msg["epoch"]).to_dict()
+            self.send_msg(msg=reply_msg, dest=msg["sender"], send_to_warehouse=False)
         else:
+            # Otherwise, we pass
             pass
         return
     
@@ -357,6 +389,7 @@ class P2PNode:
         """
         sender = msg["sender"]
         self.traders[sender] = self.nodes[sender]  # Structuring it this way let's us avoid locks on self.traders
+        self.election_epoch += 1
         return
     
     def leader_logic(self):
