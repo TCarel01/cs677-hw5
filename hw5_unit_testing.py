@@ -366,10 +366,6 @@ class TestCachingTrader(TestNonCachingTrader):
         self.assertDictEqual(reply_msg, expected_reply)
         return
 
-        
-        
-
-
 
 if __name__ == "__main__":
     #unittest.main()
