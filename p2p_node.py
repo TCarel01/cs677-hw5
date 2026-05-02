@@ -335,6 +335,7 @@ class P2PNode:
         else:
             # Once we have enough traders, we're done with electing phase
             self.is_electing = False
+            time.sleep(1)
         return
     
     def iwon(self):
@@ -347,6 +348,7 @@ class P2PNode:
         self.election_epoch += 1
         for nid in self.nodes.keys():
             self.send_msg(msg.to_dict(), nid)
+        self.send_msg(msg.to_dict(), -1, send_to_warehouse=True)
         self.is_leader = True
         self.is_up_for_election = False
         #self.traders[self.id] = self.nodes[self.id]  # Structuring it this way let's us avoid locks on self.traders

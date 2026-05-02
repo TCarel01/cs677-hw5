@@ -48,6 +48,7 @@ class Warehouse:
             SALT = 0,
             BOAR = 0,
             FISH = 0,
+            
         )
         self.next_sync_timestamp = datetime.now()
         return
@@ -97,8 +98,8 @@ class Warehouse:
                     self.stop()
                     break
                 else:
-                    if msg["sender"] is not None and msg["sender"] not in self.leader_ids:
-                        self.leader_ids.add(msg["sender"])
+                    #if msg["sender"] is not None and msg["sender"] not in self.leader_ids:
+                    #    self.leader_ids.add(msg["sender"])
                     executor.submit(self.handle_msg, msg)
                 if datetime.now() > self.next_sync_timestamp and not self.synchronous:
                     self.resync_totals()
@@ -140,6 +141,9 @@ class Warehouse:
                 self.handle_buy(msg)
             case enums.MsgType.RESTOCK.name:
                 self.handle_restock(msg)
+            case enums.ElecMsgType.IWON.name:
+                self.leader_ids.add(msg["sender"])
+                print(f"{datetime.now()}, election, warehouse sees traders {self.leader_ids}")
             case enums.ControlMsgType.STOP.name:
                 self.stop()
             case _:
@@ -183,7 +187,7 @@ class Warehouse:
         try:
             self.send_msg(reply, dest=msg["sender"])
         except:
-            print(f"{datetime.now()}, {msg['uid']}, Leader {msg['sender']} detected to have gone down from warehouse, resending buy reply to a new leader")
+            print(f"{datetime.now()}, {msg['uid']}, Leader {msg['sender']} detected to have gone down from warehouse. Resending buy reply to a new leader")
             self.leader_ids.remove(msg["sender"])
             msg_sender = random.choice(list(self.leader_ids))
             self.send_msg(reply, msg_sender)
@@ -212,7 +216,7 @@ class Warehouse:
         try:
             self.send_msg(reply, dest=msg["sender"])
         except:
-            print(f"{datetime.now()}, {msg['uid']}, Leader {msg['sender']} detected to have gone down from warehouse, resending restock reply to a new leader")
+            print(f"{datetime.now()}, {msg['uid']}, Leader {msg['sender']} detected to have gone down from warehouse. Resending restock reply to a new leader")
             self.leader_ids.remove(msg["sender"])
             msg_sender = random.choice(list(self.leader_ids))
             self.send_msg(reply, msg_sender)
