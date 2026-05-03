@@ -285,7 +285,7 @@ class Warehouse:
                     msg["is_original_leader"] = False
                     msg["print_message"] = True
                     chosen_sent_leader = random.choice(list(self.leader_ids))
-                    print(f"{datetime.now()}, {msg["uid"]}, Resending response from warehouse of type {msg['type']} for {msg["quantity"]} {msg["item"]}")
+                    print(f"{datetime.now()}, {msg['uid']}, Resending response from warehouse of type {msg['type']} for {msg['quantity']} {msg['item']}")
                     self.send_msg(msg, chosen_sent_leader)
                 except:
                     continue

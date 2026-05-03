@@ -424,7 +424,7 @@ class P2PNode:
             )
             try:
                 chosen_sent_leader = random.choice(list(self.traders.keys()))
-                print(f"{datetime.now()}, {msg["uid"]}, Retrying request of type {msg['type']} for {msg["quantity"]} {msg["item"]}")
+                print(f"{datetime.now()}, {msg['uid']}, Retrying request of type {msg['type']} for {msg['quantity']} {msg['item']}")
                 self.send_msg(msg, chosen_sent_leader, False)
             except:
                 continue
