@@ -67,6 +67,7 @@ class P2PNode:
         self.leader_time_to_die = leader_time_to_die
         # Leader specific attributes
         self.next_heartbeat_timestamp = datetime.now() + timedelta(0, 30)
+        self.stop_messages_timestamp = datetime.now() + timedelta(0, 55)
 
         # Further peer attributes
         self.next_buy_ts = datetime.now() + timedelta(0, random.randint(1, 10))  # days, seconds
@@ -116,6 +117,7 @@ class P2PNode:
         self.locks["SHOPPING_LIST"] = threading.Lock()
         self.locks["REPLICATED_LOCK"] = threading.Lock()
         self.locks["RESEND_LOG_LOCK"] = threading.Lock()
+        self.locks["AVOID_SENDING_REQUESTS"] = threading.Lock()
 
         # Start run loop (after waiting 5 seconds so all nodes are online)
         time.sleep(5)
@@ -236,6 +238,8 @@ class P2PNode:
                 self.handle_heartbeat(msg)
             case enums.MsgType.HEARTBEAT_REPLY.name:
                 self.handle_heartbeat_reply(msg)
+            case enums.MsgType.LEADER_DOWN.name:
+                self.handle_leader_removal(msg)
 
 
 
@@ -265,14 +269,16 @@ class P2PNode:
 
         chosen_trader = random.choice(list(self.traders.keys()))
         # try catch block, for fault tolerance implementation pater
+        self.locks["AVOID_SENDING_REQUESTS"].acquire()
+        self.locks["AVOID_SENDING_REQUESTS"].release()
         try:
             self.send_msg(outgoing_msg, chosen_trader)
         except:
             # if we've entered here, one of our leaders has failed. Remove leader from leader set and pick another
             print(f"{datetime.now()}, {uid}. Node {self.id} failed to reach leader when purchasing. Queueing request to purchase {item}")
-            self.append_to_node_log(uid, self.id, enums.MsgType.BUY.name, item, quantity)
+            self.append_to_resend_log(uid, self.id, enums.MsgType.BUY.name, item, quantity)
         finally:
-            self.next_buy_ts = datetime.now() + timedelta(0, 5)
+            self.next_buy_ts = datetime.now() + timedelta(0, 10)
         return
 
 
@@ -300,11 +306,13 @@ class P2PNode:
 
         chosen_trader = random.choice(list(self.traders.keys()))
         # try catch block, for fault tolerance implementation pater
+        self.locks["AVOID_SENDING_REQUESTS"].acquire()
+        self.locks["AVOID_SENDING_REQUESTS"].release()
         try:
             self.send_msg(outgoing_msg, chosen_trader)
         except:
             print(f"{datetime.now()}, {uid} Node {self.id} failed to reach leader when restocking. Queueing request to be resent.")
-            self.append_to_node_log(uid, self.id, enums.MsgType.RESTOCK.name, item, self.restock_qty)
+            self.append_to_resend_log(uid, self.id, enums.MsgType.RESTOCK.name, item, self.restock_qty)
         finally:
             self.next_restock_ts = datetime.now() + timedelta(0, 20)
         return
@@ -321,9 +329,10 @@ class P2PNode:
 
     def peer_buy_reply(self, msg:dict):
         self.locks["REPLICATED_LOCK"].acquire()
-        self.replicated_totals[msg["item"]] -= msg["quantity"]
+        if not msg["print_message"]:
+            self.replicated_totals[msg["item"]] -= msg["quantity"]
         self.locks["REPLICATED_LOCK"].release()
-        if msg["is_original_leader"]:
+        if msg["is_original_leader"] or msg["print_message"]:
             peer_id = msg["peer_id"]
             msg["sender"] = self.id
             self.send_msg(msg, peer_id, False)
@@ -335,9 +344,9 @@ class P2PNode:
         msg["type"] = enums.MsgType.BUY_REPLY.name
         self.send_msg(msg, peer, False)
 
-    def append_to_node_log(self, uid, sender, type, item, quantity):
+    def append_to_resend_log(self, uid, sender, type, item, quantity):
         """
-        Add entry to node_log.
+        Add entry to requests to be resent.
         """
         self.locks["RESEND_LOG_LOCK"].acquire()
         log_entry = dict(
@@ -381,6 +390,49 @@ class P2PNode:
 
     def handle_heartbeat_reply(self, msg:dict):
         self.heartbeat_confirmation[msg["sender"]] = True
+
+    def send_leader_down(self, leaders:list):
+        msg = dict(
+            type=enums.MsgType.LEADER_DOWN.name,
+            sender = self.id,
+            leaders = leaders
+        )
+        # FIXME: maybe doesn't need fixing in multiple leaders going down case, but assignment specs
+        # only require fault tolerance in the case of two leaders so should be fine
+        # loop over set difference of nodes and leaders
+        for cur_node_id in self.nodes:
+            try:
+                self.send_msg(msg, cur_node_id, False)
+            except:
+                continue
+        self.send_msg(msg, -1, True)
+
+    def handle_leader_removal(self, msg:dict):
+        leaders = msg["leaders"]
+        for leader in leaders:
+            self.traders.pop(leader, -1)
+            self.nodes.pop(leader, -1)
+        self.locks["AVOID_SENDING_REQUESTS"].acquire()
+        self.locks["RESEND_LOG_LOCK"].acquire()
+        for i, request in self.resend_peer_log.iterrows():
+            msg=dict(
+                uid=request["uid"],
+                sender=request["sender"],
+                type=request["type"],
+                item=request["item"],
+                quantity=request["quantity"]
+            )
+            try:
+                chosen_sent_leader = random.choice(list(self.traders.keys()))
+                print(f"{datetime.now()}, {msg["uid"]}, Retrying request of type {msg['type']} for {msg["quantity"]} {msg["item"]}")
+                self.send_msg(msg, chosen_sent_leader, False)
+            except:
+                continue
+        self.locks["RESEND_LOG_LOCK"].release()
+        self.locks["AVOID_SENDING_REQUESTS"].release()
+
+
+
 
     def election_logic(self):
         """
@@ -468,10 +520,17 @@ class P2PNode:
             if all(value is True for value in self.heartbeat_confirmation.values()):
                 self.heartbeat_confirmation = {key: False for key in self.heartbeat_confirmation}
                 self.send_heartbeat_request()
-                self.next_heartbeat_timestamp = self.next_heartbeat_timestamp + timedelta(0, 30)
+                self.next_heartbeat_timestamp = self.next_heartbeat_timestamp + timedelta(0, 10)
             else:
-                # FIXME: implement resending of local messages
-                test = 2
+                false_vals = [e for e in self.heartbeat_confirmation.keys() if self.heartbeat_confirmation[e] is False]
+                self.heartbeat_confirmation = {key: self.heartbeat_confirmation[key]
+                                               for key in self.heartbeat_confirmation.keys()
+                                               if self.heartbeat_confirmation[key] is True}
+                for val in false_vals:
+                    self.heartbeat_confirmation.pop(val, -1)
+                    self.traders.pop(val, -1)
+                    self.nodes.pop(val, -1)
+                self.send_leader_down(false_vals)
         return
 
     def client_logic(self):
@@ -479,10 +538,10 @@ class P2PNode:
         Logic that non-leaders gro through in run_loop.
         """
         if self.is_seller:
-            if self.next_restock_ts < datetime.now():
+            if self.next_restock_ts < datetime.now(): # < self.stop_messages_timestamp:
                 self.restock()
         if self.is_buyer:
-            if self.next_buy_ts < datetime.now():
+            if self.next_buy_ts < datetime.now(): # < self.stop_messages_timestamp:
                 self.buy()
         return
     

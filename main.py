@@ -103,7 +103,7 @@ if __name__ == "__main__":
     # num_nodes = int(sys.argv[1])
 
     # FIXME: remove debug statement
-    num_nodes = 10
+    num_nodes = 6
 
     # if type(num_nodes) is not int or num_nodes < 6:
     #     print("please pass an integer greater than 5")

@@ -40,8 +40,9 @@ class Warehouse:
         # stores ID in here whenever it receives a request from a leader, used for fault tolerance
         self.leader_ids = set()
         # Used to store and process incoming requests
-        self.warehouse_log = pd.DataFrame(
-            columns=["uid", "sender", "type", "item", "quantity", "status"])
+
+        self.resend_warehouse_log = pd.DataFrame(
+            columns=["uid", "sender", "type", "item", "quantity", "peer_id", "is_original_leader"])
         # Quantities
         self.locks = dict()
         self.inv = dict(
@@ -66,6 +67,8 @@ class Warehouse:
             BOAR = threading.Lock(),
             FISH = threading.Lock(),
             SYNCHRONOUS = threading.Lock(),
+            RESEND_LOG_LOCK = threading.Lock(),
+            AVOID_SENDING_REQUESTS =  threading.Lock()
         )
         # Start running
         self.running = True
@@ -144,6 +147,8 @@ class Warehouse:
             case enums.ElecMsgType.IWON.name:
                 self.leader_ids.add(msg["sender"])
                 print(f"{datetime.now()}, election, warehouse sees traders {self.leader_ids}")
+            case enums.MsgType.LEADER_DOWN.name:
+                self.handle_leader_removal(msg)
             case enums.ControlMsgType.STOP.name:
                 self.stop()
             case _:
@@ -184,25 +189,30 @@ class Warehouse:
                             quantity=sold,
                             peer_id=msg["peer_id"],
                             passed_cache=True).to_dict()
-        try:
-            for cur_leader_id in self.leader_ids:
-                if cur_leader_id == msg["sender"]:
-                    cur_reply = enums.TxMsg(uid=msg["uid"],
-                            sender=self.id,
-                            type=enums.MsgType.BUY_REPLY.name,
-                            item=item,
-                            quantity=sold,
-                            peer_id=msg["peer_id"],
-                            passed_cache=True,
-                            is_original_leader=True).to_dict()
+        self.locks["AVOID_SENDING_REQUESTS"].acquire()
+        self.locks["AVOID_SENDING_REQUESTS"].release()
+        for cur_leader_id in self.leader_ids:
+            if cur_leader_id == msg["sender"]:
+                cur_reply = enums.TxMsg(uid=msg["uid"],
+                        sender=self.id,
+                        type=enums.MsgType.BUY_REPLY.name,
+                        item=item,
+                        quantity=sold,
+                        peer_id=msg["peer_id"],
+                        passed_cache=True,
+                        is_original_leader=True).to_dict()
+                try:
                     self.send_msg(cur_reply, cur_leader_id)
-                else:
+                except:
+                    self.append_to_resend_log(cur_reply["uid"], cur_reply["sender"], cur_reply["type"],
+                                              cur_reply["item"], cur_reply["quantity"], cur_reply["peer_id"],
+                                              cur_reply["is_original_leader"])
+            else:
+                try:
                     self.send_msg(reply, cur_leader_id)
-        except:
-            print(f"{datetime.now()}, {msg['uid']}, Leader {msg['sender']} detected to have gone down from warehouse. Resending buy reply to a new leader")
-            self.leader_ids.remove(msg["sender"])
-            msg_sender = random.choice(list(self.leader_ids))
-            self.send_msg(reply, msg_sender)
+                except:
+                    self.append_to_resend_log(reply["uid"], reply["sender"], reply["type"], reply["item"],
+                                              reply["quantity"], reply["peer_id"], reply["is_original_leader"])
 
         return
     
@@ -225,8 +235,10 @@ class Warehouse:
                             quantity=stocked,
                             peer_id=msg["peer_id"]
                             ).to_dict()
-        try:
-            for cur_leader_id in self.leader_ids:
+
+        self.locks["AVOID_SENDING_REQUESTS"].acquire()
+        self.locks["AVOID_SENDING_REQUESTS"].release()
+        for cur_leader_id in self.leader_ids:
                 if cur_leader_id == msg["sender"]:
                     cur_reply = enums.TxMsg(uid=msg["uid"],
                                             sender=self.id,
@@ -235,15 +247,52 @@ class Warehouse:
                                             quantity=stocked,
                                             peer_id=msg["peer_id"],
                                             is_original_leader=True).to_dict()
-                    self.send_msg(cur_reply, cur_leader_id)
+                    try:
+                        self.send_msg(cur_reply, cur_leader_id)
+                    except:
+                        self.append_to_resend_log(cur_reply["uid"], cur_reply["sender"], cur_reply["type"],
+                                                  cur_reply["item"], cur_reply["quantity"], cur_reply["peer_id"],
+                                                  cur_reply["is_original_leader"])
                 else:
-                    self.send_msg(reply, cur_leader_id)
-        except:
-            print(f"{datetime.now()}, {msg['uid']}, Leader {msg['sender']} detected to have gone down from warehouse. Resending restock reply to a new leader")
-            self.leader_ids.remove(msg["sender"])
-            msg_sender = random.choice(list(self.leader_ids))
-            self.send_msg(reply, msg_sender)
+                    try:
+                        self.send_msg(reply, cur_leader_id)
+                    except:
+                        self.append_to_resend_log(reply["uid"], reply["sender"], reply["type"], reply["item"],
+                                                  reply["quantity"], reply["peer_id"], reply["is_original_leader"])
+
+
         return
+
+    def handle_leader_removal(self, msg:dict):
+        leaders = msg["leaders"]
+        for leader in leaders:
+            self.leader_ids.discard(leader)
+            self.nodes.pop(leader, -1)
+        self.locks["AVOID_SENDING_REQUESTS"].acquire()
+        self.locks["RESEND_LOG_LOCK"].acquire()
+        for i, request in self.resend_warehouse_log.iterrows():
+            msg=dict(
+                uid=request["uid"],
+                sender=request["sender"],
+                type=request["type"],
+                item=request["item"],
+                quantity=request["quantity"],
+                peer_id=request["peer_id"],
+                is_original_leader=request["is_original_leader"]
+            )
+            if msg["is_original_leader"]:
+                try:
+                    msg["is_original_leader"] = False
+                    msg["print_message"] = True
+                    chosen_sent_leader = random.choice(list(self.leader_ids))
+                    print(f"{datetime.now()}, {msg["uid"]}, Resending response from warehouse of type {msg['type']} for {msg["quantity"]} {msg["item"]}")
+                    self.send_msg(msg, chosen_sent_leader)
+                except:
+                    continue
+        self.resend_warehouse_log.drop(self.resend_warehouse_log.index)
+        self.locks["RESEND_LOG_LOCK"].release()
+        self.locks["AVOID_SENDING_REQUESTS"].release()
+
     
     def send_msg(self, msg:dict, dest:int):
         """
@@ -261,5 +310,28 @@ class Warehouse:
             node_socket.close()
         return
 
+    def append_to_resend_log(self, uid, sender, type, item, quantity, peer_id, is_original_leader):
+        """
+        Add entry to requests to be resent.
+        """
+        self.locks["RESEND_LOG_LOCK"].acquire()
+        log_entry = dict(
+            uid = uid,
+            sender = sender,
+            type = type,
+            item = item,
+            quantity = quantity,
+            peer_id = peer_id,
+            is_original_leader = is_original_leader
+        )
+        try:
+            if uid not in self.resend_warehouse_log["uid"].to_list():
+                # Only add the entry if it's not already in the log.
+                self.resend_warehouse_log.loc[len(self.resend_warehouse_log)] = log_entry
+        except Exception as e:
+            print(e)
+            raise Exception
+        self.locks["RESEND_LOG_LOCK"].release()
+        return
 
 
