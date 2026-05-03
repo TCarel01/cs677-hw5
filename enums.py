@@ -26,6 +26,8 @@ class MsgType(Enum):
     UPDATE = 4  # Msg from trader to warehouse sending an update to inventory.
     UPDATE_REPLY = 5  # Msg from warehouse to trader indicating if update was accepted.
     SYNC_DATA = 6 # Eventual consistency implementation, sending the current totals to the leaders.
+    HEARTBEAT = 7 # Heartbeat for sending from leader to leader
+    HEARTBEAT_REPLY = 8 # Response to the sent heartbeat request
 
 class ElecMsgType(Enum):
     """Defines election msg types."""

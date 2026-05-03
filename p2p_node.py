@@ -65,6 +65,8 @@ class P2PNode:
         self.is_buyer = is_buyer
         self.is_seller = is_seller
         self.leader_time_to_die = leader_time_to_die
+        # Leader specific attributes
+        self.next_heartbeat_timestamp = datetime.now() + timedelta(0, 30)
 
         # Further peer attributes
         self.next_buy_ts = datetime.now() + timedelta(0, random.randint(1, 10))  # days, seconds
@@ -75,7 +77,10 @@ class P2PNode:
             raise Exception  # This shouldn't happen, per assignment instructions
         self.is_leader = False
         self.replicated_totals = {enums.Item.SALT.name: 0, enums.Item.BOAR.name: 0, enums.Item.FISH.name: 0}
+        self.heartbeat_confirmation = {}
         self.num_restocks = {enums.Item.SALT.name: 0, enums.Item.BOAR.name: 0, enums.Item.FISH.name: 0}
+        self.resend_peer_log = pd.DataFrame(
+            columns=["uid", "sender", "type", "item", "quantity"])
         # Network details
         self.nodes = nodes
         self.warehouse_port = warehouse_port
@@ -110,6 +115,7 @@ class P2PNode:
         self.locks["SELLING_LIST"] = threading.Lock()
         self.locks["SHOPPING_LIST"] = threading.Lock()
         self.locks["REPLICATED_LOCK"] = threading.Lock()
+        self.locks["RESEND_LOG_LOCK"] = threading.Lock()
 
         # Start run loop (after waiting 5 seconds so all nodes are online)
         time.sleep(5)
@@ -226,6 +232,11 @@ class P2PNode:
                 self.locks["REPLICATED_LOCK"].acquire()
                 self.replicated_totals = msg["totals"]
                 self.locks["REPLICATED_LOCK"].release()
+            case enums.MsgType.HEARTBEAT.name:
+                self.handle_heartbeat(msg)
+            case enums.MsgType.HEARTBEAT_REPLY.name:
+                self.handle_heartbeat_reply(msg)
+
 
 
         return
@@ -258,10 +269,8 @@ class P2PNode:
             self.send_msg(outgoing_msg, chosen_trader)
         except:
             # if we've entered here, one of our leaders has failed. Remove leader from leader set and pick another
-            print(f"{datetime.now()}, {uid}. Node {self.id} failed to reach leader when purchasing. Retrying to purchase {item} with a new chosen trader")
-            self.traders.pop(chosen_trader)
-            chosen_trader = random.choice(list(self.traders.keys()))
-            self.send_msg(outgoing_msg, chosen_trader)
+            print(f"{datetime.now()}, {uid}. Node {self.id} failed to reach leader when purchasing. Queueing request to purchase {item}")
+            self.append_to_node_log(uid, self.id, enums.MsgType.BUY.name, item, quantity)
         finally:
             self.next_buy_ts = datetime.now() + timedelta(0, 5)
         return
@@ -294,12 +303,11 @@ class P2PNode:
         try:
             self.send_msg(outgoing_msg, chosen_trader)
         except:
-            print(f"{datetime.now()}, {uid} Node {self.id} failed to reach leader when restocking. Retrying to restock {item} with a new chosen trader")
-            self.traders.pop(chosen_trader)
-            chosen_trader = random.choice(list(self.traders.keys()))
-            self.send_msg(outgoing_msg, chosen_trader)
-
-        self.next_restock_ts = datetime.now() + timedelta(0, 20)
+            print(f"{datetime.now()}, {uid} Node {self.id} failed to reach leader when restocking. Queueing request to be resent.")
+            self.append_to_node_log(uid, self.id, enums.MsgType.RESTOCK.name, item, self.restock_qty)
+        finally:
+            self.next_restock_ts = datetime.now() + timedelta(0, 20)
+        return
 
     def forward_transaction(self, msg:dict):
         """
@@ -327,6 +335,52 @@ class P2PNode:
         msg["type"] = enums.MsgType.BUY_REPLY.name
         self.send_msg(msg, peer, False)
 
+    def append_to_node_log(self, uid, sender, type, item, quantity):
+        """
+        Add entry to node_log.
+        """
+        self.locks["RESEND_LOG_LOCK"].acquire()
+        log_entry = dict(
+            uid = uid,
+            sender = sender,
+            type = type,
+            item = item,
+            quantity = quantity
+        )
+        try:
+            if uid not in self.resend_peer_log["uid"].to_list():
+                # Only add the entry if it's not already in the log.
+                self.resend_peer_log.loc[len(self.resend_peer_log)] = log_entry
+        except Exception as e:
+            print(e)
+            raise Exception
+        self.locks["RESEND_LOG_LOCK"].release()
+        return
+
+    def send_heartbeat_request(self):
+        for node_id in self.traders.keys():
+            heartbeat_dict = dict(
+                type = enums.MsgType.HEARTBEAT.name,
+                sender = self.id
+            )
+            try:
+                self.send_msg(heartbeat_dict, node_id, False)
+            except:
+                continue
+        return
+
+    def handle_heartbeat(self, msg:dict):
+        reply_msg = dict(
+            type = enums.MsgType.HEARTBEAT_REPLY.name,
+            sender = self.id
+        )
+        try:
+            self.send_msg(reply_msg, msg["sender"], False)
+        except:
+            return
+
+    def handle_heartbeat_reply(self, msg:dict):
+        self.heartbeat_confirmation[msg["sender"]] = True
 
     def election_logic(self):
         """
@@ -402,6 +456,7 @@ class P2PNode:
         """
         sender = msg["sender"]
         self.traders[sender] = self.nodes[sender]  # Structuring it this way let's us avoid locks on self.traders
+        self.heartbeat_confirmation[sender] = True
         self.election_epoch += 1
         return
     
@@ -409,6 +464,14 @@ class P2PNode:
         """
         Logic that leaders go through in run_loop.
         """
+        if datetime.now() > self.next_heartbeat_timestamp:
+            if all(value is True for value in self.heartbeat_confirmation.values()):
+                self.heartbeat_confirmation = {key: False for key in self.heartbeat_confirmation}
+                self.send_heartbeat_request()
+                self.next_heartbeat_timestamp = self.next_heartbeat_timestamp + timedelta(0, 30)
+            else:
+                # FIXME: implement resending of local messages
+                test = 2
         return
 
     def client_logic(self):
