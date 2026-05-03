@@ -50,7 +50,7 @@ class ActionStatus(Enum):
 
 
 class TxMsg:
-    def __init__(self, uid, sender: int, type: str, item: str, quantity: int, peer_id:int | None=None, passed_cache:bool=False):
+    def __init__(self, uid, sender: int, type: str, item: str, quantity: int, peer_id:int | None=None, passed_cache:bool=False, is_original_leader:bool=False):
         self.uid = uid
         self.sender = sender
         self.type = type
@@ -59,7 +59,8 @@ class TxMsg:
         self.is_done = False
         self.peer_id = peer_id
         self.passed_cache = passed_cache
-    
+        self.is_original_leader = is_original_leader
+
     def to_dict(self) -> dict:
         d = dict(
             uid = self.uid,
@@ -68,7 +69,8 @@ class TxMsg:
             item = self.item,
             quantity = self.quantity,
             peer_id = self.peer_id,
-            passed_cache = self.passed_cache
+            passed_cache = self.passed_cache,
+            is_original_leader = self.is_original_leader
         )
         return d
     
@@ -82,7 +84,7 @@ class ElectMsg:
         self.uid = uid
         self.type = type
         self.epoch = epoch
-    
+
     def to_dict(self) -> dict:
         d = dict(
             sender = self.sender,

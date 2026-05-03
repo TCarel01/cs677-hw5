@@ -101,8 +101,8 @@ class Warehouse:
                     #if msg["sender"] is not None and msg["sender"] not in self.leader_ids:
                     #    self.leader_ids.add(msg["sender"])
                     executor.submit(self.handle_msg, msg)
-                if datetime.now() > self.next_sync_timestamp and not self.synchronous:
-                    self.resync_totals()
+                # if datetime.now() > self.next_sync_timestamp and not self.synchronous:
+                #     self.resync_totals()
 
         return
 
@@ -185,7 +185,19 @@ class Warehouse:
                             peer_id=msg["peer_id"],
                             passed_cache=True).to_dict()
         try:
-            self.send_msg(reply, dest=msg["sender"])
+            for cur_leader_id in self.leader_ids:
+                if cur_leader_id == msg["sender"]:
+                    cur_reply = enums.TxMsg(uid=msg["uid"],
+                            sender=self.id,
+                            type=enums.MsgType.BUY_REPLY.name,
+                            item=item,
+                            quantity=sold,
+                            peer_id=msg["peer_id"],
+                            passed_cache=True,
+                            is_original_leader=True).to_dict()
+                    self.send_msg(cur_reply, cur_leader_id)
+                else:
+                    self.send_msg(reply, cur_leader_id)
         except:
             print(f"{datetime.now()}, {msg['uid']}, Leader {msg['sender']} detected to have gone down from warehouse. Resending buy reply to a new leader")
             self.leader_ids.remove(msg["sender"])
@@ -214,7 +226,18 @@ class Warehouse:
                             peer_id=msg["peer_id"]
                             ).to_dict()
         try:
-            self.send_msg(reply, dest=msg["sender"])
+            for cur_leader_id in self.leader_ids:
+                if cur_leader_id == msg["sender"]:
+                    cur_reply = enums.TxMsg(uid=msg["uid"],
+                                            sender=self.id,
+                                            type=enums.MsgType.RESTOCK_REPLY.name,
+                                            item=item,
+                                            quantity=stocked,
+                                            peer_id=msg["peer_id"],
+                                            is_original_leader=True).to_dict()
+                    self.send_msg(cur_reply, cur_leader_id)
+                else:
+                    self.send_msg(reply, cur_leader_id)
         except:
             print(f"{datetime.now()}, {msg['uid']}, Leader {msg['sender']} detected to have gone down from warehouse. Resending restock reply to a new leader")
             self.leader_ids.remove(msg["sender"])

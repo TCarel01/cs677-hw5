@@ -41,8 +41,8 @@ def make_random_network(num_nodes: int, start_port, num_traders:int, synchronous
                                                nodes=node_ports,
                                                synchronous=synchronous)
             network[warehouse_port] = wh_node
-        if id == num_nodes - 1 and not synchronous:
-            leader_time_to_die = datetime.now() + timedelta(0, 40)
+        # if id == num_nodes - 1 and not synchronous:
+            # leader_time_to_die = datetime.now() + timedelta(0, 40)
         curr_port_number = node_ports[id]
         role = random.choice(list(enums.Role)).name
         # Give this node a list of all node ports except its own.

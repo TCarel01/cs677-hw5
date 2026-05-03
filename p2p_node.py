@@ -65,6 +65,7 @@ class P2PNode:
         self.is_buyer = is_buyer
         self.is_seller = is_seller
         self.leader_time_to_die = leader_time_to_die
+
         # Further peer attributes
         self.next_buy_ts = datetime.now() + timedelta(0, random.randint(1, 10))  # days, seconds
         self.next_restock_ts = datetime.now() + timedelta(0, random.randint(12, 15))  # days, seconds
@@ -74,6 +75,7 @@ class P2PNode:
             raise Exception  # This shouldn't happen, per assignment instructions
         self.is_leader = False
         self.replicated_totals = {enums.Item.SALT.name: 0, enums.Item.BOAR.name: 0, enums.Item.FISH.name: 0}
+        self.num_restocks = {enums.Item.SALT.name: 0, enums.Item.BOAR.name: 0, enums.Item.FISH.name: 0}
         # Network details
         self.nodes = nodes
         self.warehouse_port = warehouse_port
@@ -214,7 +216,12 @@ class P2PNode:
                         print(
                             f"{datetime.now()}, {msg['uid']}, succeeded. Node {self.id} purchased {msg['quantity']} {msg['item']}")
             case enums.MsgType.RESTOCK_REPLY.name:
-                print(f"{datetime.now()}, {msg['uid']}, made by node {msg['peer_id']} succeeded. Inventory restocked with {msg['quantity']} {msg['item']}")
+                self.locks["REPLICATED_LOCK"].acquire()
+                self.replicated_totals[msg["item"]] += msg["quantity"]
+                self.num_restocks[msg["item"]] += 1
+                self.locks["REPLICATED_LOCK"].release()
+                if msg["is_original_leader"]:
+                    print(f"{datetime.now()}, {msg['uid']}, made by node {msg['peer_id']} succeeded. Inventory restocked with {msg['quantity']} {msg['item']}")
             case enums.MsgType.SYNC_DATA.name:
                 self.locks["REPLICATED_LOCK"].acquire()
                 self.replicated_totals = msg["totals"]
@@ -305,9 +312,13 @@ class P2PNode:
         self.send_msg(msg, self.warehouse_port, True)
 
     def peer_buy_reply(self, msg:dict):
-        peer_id = msg["peer_id"]
-        msg["sender"] = self.id
-        self.send_msg(msg, peer_id, False)
+        self.locks["REPLICATED_LOCK"].acquire()
+        self.replicated_totals[msg["item"]] -= msg["quantity"]
+        self.locks["REPLICATED_LOCK"].release()
+        if msg["is_original_leader"]:
+            peer_id = msg["peer_id"]
+            msg["sender"] = self.id
+            self.send_msg(msg, peer_id, False)
 
     def reject_purchase_insufficient_cache(self, msg:dict):
         msg["quantity"] = 0
@@ -405,10 +416,10 @@ class P2PNode:
         Logic that non-leaders gro through in run_loop.
         """
         if self.is_seller:
-            if datetime.now() > self.next_restock_ts:
+            if self.next_restock_ts < datetime.now():
                 self.restock()
         if self.is_buyer:
-            if datetime.now() > self.next_buy_ts:
+            if self.next_buy_ts < datetime.now():
                 self.buy()
         return
     
