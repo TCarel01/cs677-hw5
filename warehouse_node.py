@@ -183,7 +183,8 @@ class Warehouse:
                                     quantity=reply["quantity"],
                                     peer_id=reply["peer_id"],
                                     passed_cache=False,
-                                    is_original_leader=True).to_dict()
+                                    is_original_leader=True,
+                                    is_resend=True).to_dict()
             dest = random.choice(list(self.leader_ids))
             self.send_msg(msg=reply, dest=dest)
         else:
@@ -246,7 +247,8 @@ class Warehouse:
                                     quantity=reply["quantity"],
                                     peer_id=reply["peer_id"],
                                     passed_cache=False,
-                                    is_original_leader=True).to_dict()
+                                    is_original_leader=True,
+                                    is_resend=True).to_dict()
             dest = random.choice(list(self.leader_ids))
             self.send_msg(msg=reply, dest=dest)
         else:

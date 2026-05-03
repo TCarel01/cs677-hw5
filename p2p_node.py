@@ -227,8 +227,9 @@ class P2PNode:
             case enums.MsgType.RESTOCK_REPLY.name:
                 self.peer_restock_reply(msg)
                 self.locks["REPLICATED_LOCK"].acquire()
-                self.replicated_totals[msg["item"]] += msg["quantity"]
-                self.num_restocks[msg["item"]] += 1
+                if not msg["is_resend"]:
+                    self.replicated_totals[msg["item"]] += msg["quantity"]
+                    self.num_restocks[msg["item"]] += 1
                 self.locks["REPLICATED_LOCK"].release()
                 if msg["is_original_leader"]:
                     print(f"{datetime.now()}, {msg['uid']}, made by node {msg['peer_id']} succeeded. Inventory restocked with {msg['quantity']} {msg['item']}")
@@ -280,7 +281,7 @@ class P2PNode:
             self.append_to_resend_log(uid, self.id, enums.MsgType.BUY.name, item, quantity)
         except:
             # if we've entered here, one of our leaders has failed. Remove leader from leader set and pick another
-            print(f"{datetime.now()}, {uid}. Node {self.id} failed to reach leader when purchasing. Queueing request to purchase {item}")
+            print(f"{datetime.now()}, {uid}, Node {self.id} failed to reach leader when purchasing. Queueing request to purchase {item}")
             self.append_to_resend_log(uid, self.id, enums.MsgType.BUY.name, item, quantity)
         finally:
             self.next_buy_ts = datetime.now() + timedelta(0, 2) #+ timedelta(0, 10)
@@ -336,7 +337,8 @@ class P2PNode:
     def peer_buy_reply(self, msg:dict):
         self.locks["REPLICATED_LOCK"].acquire()
         if not msg["print_message"]:
-            self.replicated_totals[msg["item"]] -= msg["quantity"]
+            if not msg["is_resend"]:
+                self.replicated_totals[msg["item"]] -= msg["quantity"]
         self.locks["REPLICATED_LOCK"].release()
         if msg["is_original_leader"] or msg["print_message"]:
             peer_id = msg["peer_id"]

@@ -53,7 +53,8 @@ class ActionStatus(Enum):
 
 
 class TxMsg:
-    def __init__(self, uid, sender: int, type: str, item: str, quantity: int, peer_id:int | None=None, passed_cache:bool=False, is_original_leader:bool=False, print_message:bool=False):
+    def __init__(self, uid, sender: int, type: str, item: str, quantity: int,
+                 peer_id:int | None=None, passed_cache:bool=False, is_original_leader:bool=False, print_message:bool=False, is_resend:bool=False):
         self.uid = uid
         self.sender = sender
         self.type = type
@@ -64,6 +65,7 @@ class TxMsg:
         self.passed_cache = passed_cache
         self.is_original_leader = is_original_leader
         self.print_message = print_message
+        self.is_resend = is_resend
 
     def to_dict(self) -> dict:
         d = dict(
@@ -75,7 +77,8 @@ class TxMsg:
             peer_id = self.peer_id,
             passed_cache = self.passed_cache,
             is_original_leader = self.is_original_leader,
-            print_message = self.print_message
+            print_message = self.print_message,
+            is_resend = self.is_resend,
         )
         return d
     

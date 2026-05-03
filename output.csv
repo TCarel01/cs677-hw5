@@ -1,0 +1,4 @@
+2026-05-03 18:37:32.276465, status, node 5 starting using port 49158
+2026-05-03 18:37:37.392864, election, node 5 starting election in epoch 0
+2026-05-03 18:37:42.437983, election, node 5 won election in epoch 0
+2026-05-03 18:38:31.006177, status, node 5 stopping
