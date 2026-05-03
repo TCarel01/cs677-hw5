@@ -42,7 +42,7 @@ def make_random_network(num_nodes: int, start_port, num_traders:int, synchronous
                                                synchronous=synchronous)
             network[warehouse_port] = wh_node
         if id == num_nodes - 1 and not synchronous:
-            leader_time_to_die = datetime.now() + timedelta(0, 40)
+            leader_time_to_die = datetime.now() + timedelta(0, 60)#datetime.now() + timedelta(0, 60)
         curr_port_number = node_ports[id]
         role = random.choice(list(enums.Role)).name
         # Give this node a list of all node ports except its own.
@@ -89,9 +89,12 @@ def run_network(network: dict[int, p2p.P2PNode], run_time:int, stop_network:bool
             port = node.port_number
             msg = dict(type=enums.ControlMsgType.STOP.name)
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as node_socket:
-                node_socket.connect((socket.gethostname(), port))
-                serialized_msg = pickle.dumps(msg, -1)  # -1 is used to pick best representation
-                node_socket.sendall(serialized_msg)
+                try:
+                    node_socket.connect((socket.gethostname(), port))
+                    serialized_msg = pickle.dumps(msg, -1)  # -1 is used to pick best representation
+                    node_socket.sendall(serialized_msg)
+                except ConnectionRefusedError:
+                    pass
     # By joing the processes, this process won't end until they do.
     # In effect, this means we wait for each node process to end
     for p in process_list:
@@ -110,7 +113,7 @@ if __name__ == "__main__":
     #     exit(1)
     start_port = 49153
     network = make_random_network(num_nodes=num_nodes, start_port=start_port, num_traders=2, synchronous=False)
-    run_network(network=network, run_time=10000)
+    run_network(network=network, run_time=300)
 
 
 

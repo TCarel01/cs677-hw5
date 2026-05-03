@@ -52,6 +52,7 @@ class Warehouse:
             
         )
         self.next_sync_timestamp = datetime.now()
+        self.responses = dict()
         return
     
     def start(self):
@@ -173,46 +174,61 @@ class Warehouse:
         Checks BUY against how much inventory we have.
         Sells as much as possible, and sends a reply msg back.
         """
-        item = msg["item"]
-        ordered = msg["quantity"]
-        in_store = self.inv[item]
-        # Lock attribute, update, and release.
-        with self.locks[item]:
-            sold = (ordered if in_store > ordered else in_store)
-            self.inv[item] -= sold
-        self.handled_uids.append(msg["uid"])  # append is thread safe
-        # Return msg
-        reply = enums.TxMsg(uid=msg["uid"],
+        if msg["uid"] in self.responses.keys():
+            reply = self.responses[msg["uid"]]
+            reply = enums.TxMsg(uid=reply["uid"],
+                                    sender=reply["sender"],
+                                    type=reply["type"],
+                                    item=reply["item"],
+                                    quantity=reply["quantity"],
+                                    peer_id=reply["peer_id"],
+                                    passed_cache=False,
+                                    is_original_leader=True).to_dict()
+            dest = random.choice(list(self.leader_ids))
+            self.send_msg(msg=reply, dest=dest)
+        else:
+            item = msg["item"]
+            ordered = msg["quantity"]
+            in_store = self.inv[item]
+            # Lock attribute, update, and release.
+            with self.locks[item]:
+                sold = (ordered if in_store > ordered else in_store)
+                self.inv[item] -= sold
+            self.handled_uids.append(msg["uid"])  # append is thread safe
+            # Return msg
+            reply = enums.TxMsg(uid=msg["uid"],
+                                sender=self.id,
+                                type=enums.MsgType.BUY_REPLY.name,
+                                item=item,
+                                quantity=sold,
+                                peer_id=msg["peer_id"],
+                                passed_cache=True).to_dict()
+            # Below prevents resending of messages until backlog is emptied
+            self.locks["AVOID_SENDING_REQUESTS"].acquire()
+            self.locks["AVOID_SENDING_REQUESTS"].release()
+            for cur_leader_id in self.leader_ids:
+                if cur_leader_id == msg["sender"]:
+                    cur_reply = enums.TxMsg(uid=msg["uid"],
                             sender=self.id,
                             type=enums.MsgType.BUY_REPLY.name,
                             item=item,
                             quantity=sold,
                             peer_id=msg["peer_id"],
-                            passed_cache=True).to_dict()
-        self.locks["AVOID_SENDING_REQUESTS"].acquire()
-        self.locks["AVOID_SENDING_REQUESTS"].release()
-        for cur_leader_id in self.leader_ids:
-            if cur_leader_id == msg["sender"]:
-                cur_reply = enums.TxMsg(uid=msg["uid"],
-                        sender=self.id,
-                        type=enums.MsgType.BUY_REPLY.name,
-                        item=item,
-                        quantity=sold,
-                        peer_id=msg["peer_id"],
-                        passed_cache=True,
-                        is_original_leader=True).to_dict()
-                try:
-                    self.send_msg(cur_reply, cur_leader_id)
-                except:
-                    self.append_to_resend_log(cur_reply["uid"], cur_reply["sender"], cur_reply["type"],
-                                              cur_reply["item"], cur_reply["quantity"], cur_reply["peer_id"],
-                                              cur_reply["is_original_leader"])
-            else:
-                try:
-                    self.send_msg(reply, cur_leader_id)
-                except:
-                    self.append_to_resend_log(reply["uid"], reply["sender"], reply["type"], reply["item"],
-                                              reply["quantity"], reply["peer_id"], reply["is_original_leader"])
+                            passed_cache=True,
+                            is_original_leader=True).to_dict()
+                    self.responses[msg["uid"]] = reply
+                    try:
+                        self.send_msg(cur_reply, cur_leader_id)
+                    except:
+                        self.append_to_resend_log(cur_reply["uid"], cur_reply["sender"], cur_reply["type"],
+                                                cur_reply["item"], cur_reply["quantity"], cur_reply["peer_id"],
+                                                cur_reply["is_original_leader"])
+                else:
+                    try:
+                        self.send_msg(reply, cur_leader_id)
+                    except:
+                        self.append_to_resend_log(reply["uid"], reply["sender"], reply["type"], reply["item"],
+                                                reply["quantity"], reply["peer_id"], reply["is_original_leader"])
 
         return
     
@@ -221,46 +237,58 @@ class Warehouse:
         Called on receiving a RESTOCK msg.
         Adds items to inventory.
         """
-        item = msg["item"]
-        stocked = msg["quantity"]
-        # Lock attribute, update, and release.
-        with self.locks[item]:
-            self.inv[item] += stocked
-        self.handled_uids.append(msg["uid"])  # append is thread safe
-        # Return msg
-        reply = enums.TxMsg(uid=msg["uid"],
-                            sender=self.id,
-                            type=enums.MsgType.RESTOCK_REPLY.name,
-                            item=item,
-                            quantity=stocked,
-                            peer_id=msg["peer_id"]
-                            ).to_dict()
+        if msg["uid"] in self.responses.keys():
+            reply = self.responses[msg["uid"]]
+            reply = enums.TxMsg(uid=reply["uid"],
+                                    sender=reply["sender"],
+                                    type=reply["type"],
+                                    item=reply["item"],
+                                    quantity=reply["quantity"],
+                                    peer_id=reply["peer_id"],
+                                    passed_cache=False,
+                                    is_original_leader=True).to_dict()
+            dest = random.choice(list(self.leader_ids))
+            self.send_msg(msg=reply, dest=dest)
+        else:
+            item = msg["item"]
+            stocked = msg["quantity"]
+            # Lock attribute, update, and release.
+            with self.locks[item]:
+                self.inv[item] += stocked
+            self.handled_uids.append(msg["uid"])  # append is thread safe
+            # Return msg
+            reply = enums.TxMsg(uid=msg["uid"],
+                                sender=self.id,
+                                type=enums.MsgType.RESTOCK_REPLY.name,
+                                item=item,
+                                quantity=stocked,
+                                peer_id=msg["peer_id"]
+                                ).to_dict()
 
-        self.locks["AVOID_SENDING_REQUESTS"].acquire()
-        self.locks["AVOID_SENDING_REQUESTS"].release()
-        for cur_leader_id in self.leader_ids:
-                if cur_leader_id == msg["sender"]:
-                    cur_reply = enums.TxMsg(uid=msg["uid"],
-                                            sender=self.id,
-                                            type=enums.MsgType.RESTOCK_REPLY.name,
-                                            item=item,
-                                            quantity=stocked,
-                                            peer_id=msg["peer_id"],
-                                            is_original_leader=True).to_dict()
-                    try:
-                        self.send_msg(cur_reply, cur_leader_id)
-                    except:
-                        self.append_to_resend_log(cur_reply["uid"], cur_reply["sender"], cur_reply["type"],
-                                                  cur_reply["item"], cur_reply["quantity"], cur_reply["peer_id"],
-                                                  cur_reply["is_original_leader"])
-                else:
-                    try:
-                        self.send_msg(reply, cur_leader_id)
-                    except:
-                        self.append_to_resend_log(reply["uid"], reply["sender"], reply["type"], reply["item"],
-                                                  reply["quantity"], reply["peer_id"], reply["is_original_leader"])
-
-
+            self.locks["AVOID_SENDING_REQUESTS"].acquire()
+            self.locks["AVOID_SENDING_REQUESTS"].release()
+            for cur_leader_id in self.leader_ids:
+                    if cur_leader_id == msg["sender"]:
+                        cur_reply = enums.TxMsg(uid=msg["uid"],
+                                                sender=self.id,
+                                                type=enums.MsgType.RESTOCK_REPLY.name,
+                                                item=item,
+                                                quantity=stocked,
+                                                peer_id=msg["peer_id"],
+                                                is_original_leader=True).to_dict()
+                        self.responses[msg["uid"]] = reply
+                        try:
+                            self.send_msg(cur_reply, cur_leader_id)
+                        except:
+                            self.append_to_resend_log(cur_reply["uid"], cur_reply["sender"], cur_reply["type"],
+                                                    cur_reply["item"], cur_reply["quantity"], cur_reply["peer_id"],
+                                                    cur_reply["is_original_leader"])
+                    else:
+                        try:
+                            self.send_msg(reply, cur_leader_id)
+                        except:
+                            self.append_to_resend_log(reply["uid"], reply["sender"], reply["type"], reply["item"],
+                                                    reply["quantity"], reply["peer_id"], reply["is_original_leader"])
         return
 
     def handle_leader_removal(self, msg:dict):

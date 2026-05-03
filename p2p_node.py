@@ -214,6 +214,7 @@ class P2PNode:
                 if self.is_leader:
                     self.peer_buy_reply(msg)
                 else:
+                    self.remove_from_resend_log(msg["uid"])
                     if msg["quantity"] == 0:
                         if msg["passed_cache"]:
                             print(f"{datetime.now()}, {msg['uid']}, made by node {self.id} to buy {msg['item']} failed. Inventory for {msg['item']} depleted.")
@@ -224,12 +225,15 @@ class P2PNode:
                         print(
                             f"{datetime.now()}, {msg['uid']}, succeeded. Node {self.id} purchased {msg['quantity']} {msg['item']}")
             case enums.MsgType.RESTOCK_REPLY.name:
+                self.peer_restock_reply(msg)
                 self.locks["REPLICATED_LOCK"].acquire()
                 self.replicated_totals[msg["item"]] += msg["quantity"]
                 self.num_restocks[msg["item"]] += 1
                 self.locks["REPLICATED_LOCK"].release()
                 if msg["is_original_leader"]:
                     print(f"{datetime.now()}, {msg['uid']}, made by node {msg['peer_id']} succeeded. Inventory restocked with {msg['quantity']} {msg['item']}")
+                if not self.is_leader:
+                    self.remove_from_resend_log(msg["uid"])
             case enums.MsgType.SYNC_DATA.name:
                 self.locks["REPLICATED_LOCK"].acquire()
                 self.replicated_totals = msg["totals"]
@@ -273,12 +277,13 @@ class P2PNode:
         self.locks["AVOID_SENDING_REQUESTS"].release()
         try:
             self.send_msg(outgoing_msg, chosen_trader)
+            self.append_to_resend_log(uid, self.id, enums.MsgType.BUY.name, item, quantity)
         except:
             # if we've entered here, one of our leaders has failed. Remove leader from leader set and pick another
             print(f"{datetime.now()}, {uid}. Node {self.id} failed to reach leader when purchasing. Queueing request to purchase {item}")
             self.append_to_resend_log(uid, self.id, enums.MsgType.BUY.name, item, quantity)
         finally:
-            self.next_buy_ts = datetime.now() + timedelta(0, 10)
+            self.next_buy_ts = datetime.now() + timedelta(0, 2) #+ timedelta(0, 10)
         return
 
 
@@ -310,11 +315,12 @@ class P2PNode:
         self.locks["AVOID_SENDING_REQUESTS"].release()
         try:
             self.send_msg(outgoing_msg, chosen_trader)
+            self.append_to_resend_log(uid, self.id, enums.MsgType.RESTOCK.name, item, self.restock_qty)
         except:
             print(f"{datetime.now()}, {uid} Node {self.id} failed to reach leader when restocking. Queueing request to be resent.")
             self.append_to_resend_log(uid, self.id, enums.MsgType.RESTOCK.name, item, self.restock_qty)
         finally:
-            self.next_restock_ts = datetime.now() + timedelta(0, 20)
+            self.next_restock_ts = datetime.now() + timedelta(0, 2) #+ timedelta(0, 20)
         return
 
     def forward_transaction(self, msg:dict):
@@ -331,6 +337,18 @@ class P2PNode:
         self.locks["REPLICATED_LOCK"].acquire()
         if not msg["print_message"]:
             self.replicated_totals[msg["item"]] -= msg["quantity"]
+        self.locks["REPLICATED_LOCK"].release()
+        if msg["is_original_leader"] or msg["print_message"]:
+            peer_id = msg["peer_id"]
+            msg["sender"] = self.id
+            self.send_msg(msg, peer_id, False)
+
+    def peer_restock_reply(self, msg:dict):
+        self.locks["REPLICATED_LOCK"].acquire()
+        # Below is commented out, as this is handled in
+        # handle_msg()
+        #if not msg["print_message"]:
+        #    self.replicated_totals[msg["item"]] += msg["quantity"]
         self.locks["REPLICATED_LOCK"].release()
         if msg["is_original_leader"] or msg["print_message"]:
             peer_id = msg["peer_id"]
@@ -363,6 +381,12 @@ class P2PNode:
         except Exception as e:
             print(e)
             raise Exception
+        self.locks["RESEND_LOG_LOCK"].release()
+        return
+    
+    def remove_from_resend_log(self, uid):
+        self.locks["RESEND_LOG_LOCK"].acquire()
+        self.resend_peer_log = self.resend_peer_log[self.resend_peer_log["uid"] != uid]
         self.locks["RESEND_LOG_LOCK"].release()
         return
 
