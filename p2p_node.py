@@ -321,7 +321,7 @@ class P2PNode:
             print(f"{datetime.now()}, {uid} Node {self.id} failed to reach leader when restocking. Queueing request to be resent.\n", end="")
             self.append_to_resend_log(uid, self.id, enums.MsgType.RESTOCK.name, item, self.restock_qty)
         finally:
-            self.next_restock_ts = datetime.now() + timedelta(0, 2) #+ timedelta(0, 20)
+            self.next_restock_ts = datetime.now() + timedelta(0, 20) #+ timedelta(0, 20)
         return
 
     def forward_transaction(self, msg:dict):

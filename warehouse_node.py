@@ -147,7 +147,8 @@ class Warehouse:
                 self.handle_restock(msg)
             case enums.ElecMsgType.IWON.name:
                 self.leader_ids.add(msg["sender"])
-                print(f"{datetime.now()}, election, warehouse sees traders {self.leader_ids}")
+                leader_str = ' + '.join([str(i) for i in list(self.leader_ids)])
+                print(f"{datetime.now()}, election, warehouse sees traders {leader_str}")
             case enums.MsgType.LEADER_DOWN.name:
                 self.handle_leader_removal(msg)
             case enums.ControlMsgType.STOP.name:

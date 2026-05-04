@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import plotly.express as px
+from datetime import datetime
 import hw5_testing
 import p2p_node as p2p
 import main
@@ -34,7 +35,7 @@ def dict_to_network(node_dict: dict, warehouse_id: int, warehouse_port: int, num
     return nodes
 
 
-def generate_output():
+def generate_output(caching):
     node_dict = {
             1: dict(
                 port=49153, is_buyer=True, is_seller=False,
@@ -76,9 +77,24 @@ def generate_output():
                 port=49162, is_buyer=False, is_seller=True,
                 shopping_list=None, selling_list=None,
             ),
+            11: dict(
+                port=49163, is_buyer=False, is_seller=True,
+                shopping_list=None, selling_list=None,
+            ),
+            12: dict(
+                port=49164, is_buyer=False, is_seller=True,
+                shopping_list=None, selling_list=None,
+            ),
+            13: dict(
+                port=49165, is_buyer=False, is_seller=True,
+                shopping_list=None, selling_list=None,
+            ),
         }
-    nodes = dict_to_network(node_dict=node_dict, warehouse_id=0, warehouse_port=49152, num_traders=2, synchronous=False)
-    main.run_network(nodes, run_time=100, stop_network=True)
+    num_buyers = len([n for n in node_dict.keys() if node_dict[n]["is_buyer"]])
+    num_sellers = len([n for n in node_dict.keys() if node_dict[n]["is_seller"]])
+    print(f"{datetime.now()}, test status, there are {num_buyers} buyers and {num_sellers} sellers")
+    nodes = dict_to_network(node_dict=node_dict, warehouse_id=0, warehouse_port=49152, num_traders=5, synchronous=not caching)
+    main.run_network(nodes, run_time=300, stop_network=True)
     return
 
 def read_data(caching:bool):
@@ -116,7 +132,17 @@ def warehouse_throughout():
 
 def overselling_rate():
     df = read_data(caching=True)
-
+    # Get df of just the oversells
+    failed_buy_mask = df["status"].str.contains("depleted")
+    passed_cache_mask = ~df["status"].str.contains("expected")
+    oversell_mask = failed_buy_mask & passed_cache_mask
+    oversell_df = df[oversell_mask]
+    # Get df of all starting purchases
+    start_buy_mask = df["status"].str.contains("is buying")
+    start_buy_df = df[start_buy_mask]
+    # Calculate oversell rates
+    oversell_rate = oversell_df.shape[0] / start_buy_df.shape[0]
+    print(f"Overselling rate is {oversell_rate}")
     return
 
 def fail_impact():
@@ -124,9 +150,9 @@ def fail_impact():
 
 
 if __name__ == "__main__":
-    generate_output()
+    #generate_output(caching=True)
     
     #warehouse_throughout()
-    #overselling_rate()
+    overselling_rate()
 
 
