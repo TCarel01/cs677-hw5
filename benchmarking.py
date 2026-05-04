@@ -124,9 +124,9 @@ def fail_impact():
 
 
 if __name__ == "__main__":
-    #generate_output()
+    generate_output()
     
     #warehouse_throughout()
-    overselling_rate()
+    #overselling_rate()
 
 
