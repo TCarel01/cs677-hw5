@@ -79,8 +79,54 @@ def generate_output():
         }
     nodes = dict_to_network(node_dict=node_dict, warehouse_id=0, warehouse_port=49152, num_traders=2, synchronous=False)
     main.run_network(nodes, run_time=100, stop_network=True)
+    return
+
+def read_data(caching:bool):
+    columns = ["ts", "uid", "status"]
+    if caching:
+        df = pd.read_csv("caching_output.csv", names=columns)
+    else:
+        df = pd.read_csv("non_caching_output.csv", names=columns)
+    df["ts"] = pd.to_datetime(df["ts"])
+    return df
+
+def warehouse_throughout():
+    # Read in and clean up data
+    columns = ["ts", "uid", "status"]
+    caching_df = read_data(caching=True)
+    non_caching_df = read_data(caching=False)
+    # Calculate runtime
+    caching_runtime = (caching_df["ts"].max() - caching_df["ts"].min()).seconds
+    non_caching_runtime = (non_caching_df["ts"].max() - non_caching_df["ts"].min()).seconds
+    # Calculate total items sold
+    caching_df["completed purchase"] = caching_df["status"].str.contains("purchased")
+    non_caching_df["completed purchase"] = non_caching_df["status"].str.contains("purchased")
+    caching_df = caching_df[caching_df["completed purchase"]]
+    non_caching_df = non_caching_df[non_caching_df["completed purchase"]]
+    caching_df["quantity"] = caching_df["status"].str.split().str.slice(-2, -1).apply(lambda x: x[0]).astype(int)
+    non_caching_df["quantity"] = non_caching_df["status"].str.split().str.slice(-2, -1).apply(lambda x: x[0]).astype(int)
+    caching_total = caching_df["quantity"].sum()
+    non_caching_total = non_caching_df["quantity"].sum()
+    # Calculate throughput (items sold per seconds)
+    caching_throughput = caching_total / caching_runtime
+    non_caching_throughput = non_caching_total / non_caching_runtime
+    print(f"Caching throughput: {caching_throughput}")
+    print(f"Non caching throughput: {non_caching_throughput}")
+    return
+
+def overselling_rate():
+    df = read_data(caching=True)
+
+    return
+
+def fail_impact():
+    return
 
 
 if __name__ == "__main__":
-    generate_output()
+    #generate_output()
+    
+    #warehouse_throughout()
+    overselling_rate()
+
 

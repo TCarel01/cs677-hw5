@@ -11,35 +11,7 @@ import p2p_node as p2p
 import main
 
 
-def dict_to_network(node_dict: dict, warehouse_id: int, warehouse_port: int, num_traders: int, synchronous:bool):
-    nodes = dict()
-    traders = {nid: node_dict[nid]["port"] for nid in node_dict.keys() if node_dict[nid]["is_leader"]}
-    network_dict = {nid: node_dict[nid]["port"] for nid in node_dict.keys()}
-    for nid in node_dict.keys():
-        port = node_dict[nid]["port"]
-        node_view_of_network = network_dict.copy()
-        del node_view_of_network[nid]
-        n = p2p.P2PNode(id=nid,
-                        port_number=port,
-                        is_buyer=node_dict[nid]["is_buyer"],
-                        is_seller=node_dict[nid]["is_seller"],
-                        nodes=node_view_of_network,
-                        warehouse_port=warehouse_port,
-                        num_traders=num_traders,
-                        shopping_list=node_dict[nid]["shopping_list"],
-                        selling_list=node_dict[nid]["selling_list"],
-                        synchronized=synchronous,
-                        )
-        n.is_leader = node_dict[nid]["is_leader"]
-        n.is_electing = False
-        n.traders = traders.copy()
-        nodes[nid] = n
-    wh_node = warehouse_node.Warehouse(id=warehouse_id,
-                                       port=warehouse_port,
-                                       nodes=network_dict,
-                                       synchronous=synchronous)
-    nodes[warehouse_id] = wh_node
-    return nodes
+
 
 
 

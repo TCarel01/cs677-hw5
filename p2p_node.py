@@ -220,7 +220,7 @@ class P2PNode:
                             print(f"{datetime.now()}, {msg['uid']}, made by node {self.id} to buy {msg['item']} failed. Inventory for {msg['item']} depleted.")
                         else:
                             print(
-                                f"{datetime.now()}. {msg['uid']}, made by node {self.id} to buy {msg['item']} failed. Inventory for {msg['item']} expected to be depleted.")
+                                f"{datetime.now()}, {msg['uid']}, made by node {self.id} to buy {msg['item']} failed. Inventory for {msg['item']} expected to be depleted.")
                     else:
                         print(
                             f"{datetime.now()}, {msg['uid']}, succeeded. Node {self.id} purchased {msg['quantity']} {msg['item']}")
