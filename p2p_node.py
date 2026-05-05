@@ -318,7 +318,7 @@ class P2PNode:
             self.send_msg(outgoing_msg, chosen_trader)
             self.append_to_resend_log(uid, self.id, enums.MsgType.RESTOCK.name, item, self.restock_qty)
         except:
-            print(f"{datetime.now()}, {uid} Node {self.id} failed to reach leader when restocking. Queueing request to be resent.\n", end="")
+            print(f"{datetime.now()}, {uid}, Node {self.id} failed to reach leader when restocking. Queueing request to be resent.\n", end="")
             self.append_to_resend_log(uid, self.id, enums.MsgType.RESTOCK.name, item, self.restock_qty)
         finally:
             self.next_restock_ts = datetime.now() + timedelta(0, 20) #+ timedelta(0, 20)
