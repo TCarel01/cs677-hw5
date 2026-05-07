@@ -21,7 +21,7 @@ def custom_hook(args):
     print(f"Thread failed: {args.exc_type.__name__}: {args.exc_value}")
 threading.excepthook = custom_hook
 
-def make_random_network(num_nodes: int, start_port, num_traders:int, synchronous=False) -> dict[int, p2p.P2PNode]:
+def make_random_network(num_nodes: int, start_port, num_traders:int, synchronous=False, fault_tolerance:bool=False) -> dict[int, p2p.P2PNode]:
     """
     Creates a random network of nodes, with random roles.
     Returns dict, whose keys are ports and whose values are the nodes.
@@ -41,7 +41,7 @@ def make_random_network(num_nodes: int, start_port, num_traders:int, synchronous
                                                nodes=node_ports,
                                                synchronous=synchronous)
             network[warehouse_port] = wh_node
-        if id == num_nodes - 1 and not synchronous:
+        if id == num_nodes - 1 and not synchronous and fault_tolerance:
             leader_time_to_die = datetime.now() + timedelta(0, 60)#datetime.now() + timedelta(0, 60)
         curr_port_number = node_ports[id]
         role = random.choice(list(enums.Role)).name
@@ -59,6 +59,53 @@ def make_random_network(num_nodes: int, start_port, num_traders:int, synchronous
                                                 nodes=node_view_of_network,
                                                 warehouse_port=warehouse_port,
                                                 num_traders = num_traders,
+                                                synchronized=synchronous,
+                                                leader_time_to_die=leader_time_to_die
+                                                )
+    return network
+
+def list_to_network(node_list:list, num_traders:int, start_port:int, synchronous=False, fault_tolerance:bool=False) -> dict[int, p2p.P2PNode]:
+    """
+    For testing, we'd like to be able to specify a network
+    whose nodes have predefined nodes and predefined items.
+    To that end, this function converts a dictionary, whose keys
+    are node IDs and whose values are dictionaries with the keys
+    'port', 'role', 'shopping_list', and 'selling_list'.
+    """
+    # Start by defining the port for each node.
+    network = dict()
+    node_ports = {i:start_port+i for i in range(0, len(node_list))}
+    # Iterate through to initialize all nodes.
+    warehouse_port = 0
+    for id in range(len(node_list)):
+        leader_time_to_die = None
+        curr_port_number = node_ports[id]
+        if id == 0:
+            warehouse_port = curr_port_number - 1
+            wh_node = warehouse_node.Warehouse(id=len(node_list),
+                                               port=warehouse_port,
+                                               nodes=node_ports,
+                                               synchronous=synchronous)
+            network[warehouse_port] = wh_node
+        if id == len(node_list) - 1 and not synchronous and fault_tolerance:
+            leader_time_to_die = datetime.now() + timedelta(0, 60)#datetime.now() + timedelta(0, 60)
+        curr_port_number = node_ports[id]
+        # Give this node a list of all node ports except its own.
+        node_view_of_network = node_ports.copy()
+        del node_view_of_network[id]
+        # Three possible roles, BUYER, SELLER, and BUYER_AND_SELLER. These are passed to
+        # the node via the following two bools.
+        is_buyer = node_list[id]["is_buyer"]
+        is_seller = node_list[id]["is_seller"]
+        network[curr_port_number] = p2p.P2PNode(id=id,
+                                                port_number=curr_port_number,
+                                                is_buyer=is_buyer,
+                                                is_seller=is_seller,
+                                                nodes=node_view_of_network,
+                                                warehouse_port=warehouse_port,
+                                                num_traders = num_traders,
+                                                shopping_list=node_list[id]["shopping_list"],
+                                                selling_list=node_list[id]["selling_list"],
                                                 synchronized=synchronous,
                                                 leader_time_to_die=leader_time_to_die
                                                 )

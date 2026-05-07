@@ -257,9 +257,8 @@ class P2PNode:
         uid = uuid.uuid4()
         if self.shopping_list is not None and len(self.shopping_list) > 0:
             self.locks["SHOPPING_LIST"].acquire()
-            item_quantity_dict = self.shopping_list.pop()
-            item = list(item_quantity_dict.keys())[0]
-            quantity = item_quantity_dict[item]
+            item = self.shopping_list.pop()
+            quantity = 1
             self.locks["SHOPPING_LIST"].release()
         else:
             item = random.choice(list(enums.Item)).name
@@ -296,8 +295,7 @@ class P2PNode:
         # Either pick random item and quantity, or get them from the selling list
         if self.selling_list is not None and len(self.selling_list) > 0:
             self.locks["SELLING_LIST"].acquire()
-            item_quantity_dict = self.selling_list.pop()
-            item = list(item_quantity_dict.keys())[0]
+            item = self.selling_list.pop()
             self.locks["SELLING_LIST"].release()
         else:
             item = random.choice(list(enums.Item)).name
@@ -423,9 +421,6 @@ class P2PNode:
             sender = self.id,
             leaders = leaders
         )
-        # FIXME: maybe doesn't need fixing in multiple leaders going down case, but assignment specs
-        # only require fault tolerance in the case of two leaders so should be fine
-        # loop over set difference of nodes and leaders
         for cur_node_id in self.nodes:
             try:
                 self.send_msg(msg, cur_node_id, False)
