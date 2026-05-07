@@ -64,19 +64,19 @@ def generate_output(caching):
                 shopping_list=None, selling_list=None,
             ),
             7: dict(
-                port=49159, is_buyer=True, is_seller=False,
+                port=49159, is_buyer=False, is_seller=True,
                 shopping_list=None, selling_list=None,
             ),
             8: dict(
-                port=49160, is_buyer=True, is_seller=False,
+                port=49160, is_buyer=False, is_seller=True,
                 shopping_list=None, selling_list=None,
             ),
             9: dict(
-                port=49161, is_buyer=True, is_seller=False,
+                port=49161, is_buyer=False, is_seller=True,
                 shopping_list=None, selling_list=None,
             ),
             10: dict(
-                port=49162, is_buyer=True, is_seller=False,
+                port=49162, is_buyer=False, is_seller=True,
                 shopping_list=None, selling_list=None,
             ),
             11: dict(
@@ -87,52 +87,23 @@ def generate_output(caching):
                 port=49164, is_buyer=False, is_seller=True,
                 shopping_list=None, selling_list=None,
             ),
-            14: dict(
+            13: dict(
                 port=49165, is_buyer=False, is_seller=True,
                 shopping_list=None, selling_list=None,
             ),
-            15: dict(
+            14: dict(
                 port=49166, is_buyer=False, is_seller=True,
                 shopping_list=None, selling_list=None,
             ),
-            16: dict(
-                port=49167, is_buyer=False, is_seller=True,
-                shopping_list=None, selling_list=None,
-            ),
-            17: dict(
-                port=49168, is_buyer=False, is_seller=True,
-                shopping_list=None, selling_list=None,
-            ),
-            18: dict(
-                port=49169, is_buyer=False, is_seller=True,
-                shopping_list=None, selling_list=None,
-            ),
-            19: dict(
-                port=49170, is_buyer=False, is_seller=True,
-                shopping_list=None, selling_list=None,
-            ),
-            20: dict(
-                port=49171, is_buyer=False, is_seller=True,
-                shopping_list=None, selling_list=None,
-            ),
-            21: dict(
-                port=49172, is_buyer=False, is_seller=True,
-                shopping_list=None, selling_list=None,
-            ),
-            22: dict(
-                port=49173, is_buyer=False, is_seller=True,
-                shopping_list=None, selling_list=None,
-            ),
-            23: dict(
-                port=49174, is_buyer=False, is_seller=True,
-                shopping_list=None, selling_list=None,
-            ),
         }
-    node_dict = {nid: dict(port=49152+nid, is_buyer=nid<=4, is_seller=nid>4, shopping_list=None, selling_list=None) for nid in range(1, 10)}
+    #node_dict = {nid: dict(port=49152+nid, is_buyer=nid<=12, is_seller=nid>12, shopping_list=None, selling_list=None) for nid in range(1, 25)}
+    node_dict = {nid: dict(port=49152+nid, is_buyer=nid<=18, is_seller=nid>18, shopping_list=None, selling_list=None) for nid in range(1, 31)}
+    #node_dict = {nid: dict(port=49152+nid, is_buyer=nid<=15, is_seller=nid>15, shopping_list=None, selling_list=None) for nid in range(1, 26)}
+    #node_dict = {nid: dict(port=49152+nid, is_buyer=nid<=5, is_seller=nid>5, shopping_list=None, selling_list=None) for nid in range(1, 16)}
     num_buyers = len([n for n in node_dict.keys() if node_dict[n]["is_buyer"]])
     num_sellers = len([n for n in node_dict.keys() if node_dict[n]["is_seller"]])
     print(f"{datetime.now()}, test status, there are {num_buyers} buyers and {num_sellers} sellers")
-    nodes = dict_to_network(node_dict=node_dict, warehouse_id=0, warehouse_port=49152, num_traders=2, synchronous=not caching, time_to_die=150)
+    nodes = dict_to_network(node_dict=node_dict, warehouse_id=0, warehouse_port=49152, num_traders=10, synchronous=not caching, time_to_die=150)
     main.run_network(nodes, run_time=300, stop_network=True)
     return
 
@@ -216,14 +187,20 @@ def fault_analysis():
     fig.update_yaxes(title="Microseconds")
     fig.show()
     # Graph scatterplot of uids with x=ts, y=microseconds.
-    fig = px.scatter(df, x="ts", y="uid turnaround")
+    fig = px.scatter(df, x="ts", y="uid turnaround", title="Microseconds per BUY")
     fig.add_vline(x=first_stop_ts)
+    fig.update_xaxes(title="Timestamp of BUY Ending")
+    fig.update_yaxes(title="Total Microseconds From Start to End of BUY")
     fig.show()
     # calculate throughputs
     pre_stop_ms = (first_stop_ts - first_tx_time).microseconds
     post_stop_ms = (last_tx_time - first_stop_ts).microseconds
-    pre_stop_tput = df[df["before stop"]]["num items purchased"].astype(int).sum() / pre_stop_ms
-    post_stop_tput = df[~df["before stop"]]["num items purchased"].astype(int).sum() / post_stop_ms
+    pre_stop_s = (first_stop_ts - first_tx_time).seconds
+    post_stop_s = (last_tx_time - first_stop_ts).seconds
+    pre_stop_tput = df[df["before stop"]]["num items purchased"].astype(int).sum() / (pre_stop_s)
+    post_stop_tput = df[~df["before stop"]]["num items purchased"].astype(int).sum() / (post_stop_s)
+    print(pre_stop_tput)
+    print(post_stop_tput)
     return
 
 

@@ -191,9 +191,9 @@ class Warehouse:
         else:
             item = msg["item"]
             ordered = msg["quantity"]
-            in_store = self.inv[item]
             # Lock attribute, update, and release.
             with self.locks[item]:
+                in_store = self.inv[item]
                 sold = (ordered if in_store > ordered else in_store)
                 self.inv[item] -= sold
             self.handled_uids.append(msg["uid"])  # append is thread safe
