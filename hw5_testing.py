@@ -26,32 +26,148 @@ def test_correct_leaders_elected(num_nodes:int, num_traders:int):
     return
 
 def test_successful_purchases():
-    node_dict = {
-            0: dict(
-                port=49152, is_buyer=True, is_seller=False, is_leader=False,
-                shopping_list=["BOAR"]*100, selling_list=None,
+    """
+    Sets up a network where nodes want to purchase and sell salt and boar
+    Monitors to verify purchases are successful.
+    """
+    node_list = [
+            dict(
+                is_buyer=True, is_seller=False, shopping_list=["BOAR"]*100, selling_list=None,
             ),
-            1: dict(
-                port=49153, is_buyer=True, is_seller=False, is_leader=False,
-                shopping_list=["SALT"]*100, selling_list=None,
+            dict(
+                is_buyer=True, is_seller=False, shopping_list=["SALT"]*100, selling_list=None,
             ),
-            2: dict(
-                port=49154, is_buyer=False, is_seller=True, is_leader=False,
-                shopping_list=None, selling_list=["BOAR"]*100,
+            dict(
+                is_buyer=False, is_seller=True, shopping_list=None, selling_list=["BOAR"]*100,
             ),
-            3: dict(
-                port=49155, is_buyer=False, is_seller=True, is_leader=False,
-                shopping_list=None, selling_list=["SALT"]*100,
+            dict(
+                is_buyer=False, is_seller=True, shopping_list=None, selling_list=["SALT"]*100,
             ),
-            4: dict(
-                port=49155, is_buyer=False, is_seller=True, is_leader=True,
-                shopping_list=None, selling_list=None,
+            dict(
+                is_buyer=False, is_seller=True, shopping_list=None, selling_list=None,
             ),
-        }
+        dict(
+            is_buyer=False, is_seller=True, shopping_list=None, selling_list=None,
+        ),
+        ]
+
+    network = main.list_to_network(node_list, 2,49153)
+    main.run_network(network=network, run_time=60)
     return
+
+def test_no_sellers_async():
+    """
+    Test that no sellers results in every attempt to buy fails
+    Not synchronous model, requests never reach the warehouse
+    """
+    node_list = [
+        dict(
+            is_buyer=True, is_seller=False, shopping_list=["BOAR"] * 100, selling_list=None,
+        ),
+        dict(
+            is_buyer=True, is_seller=False, shopping_list=["SALT"] * 100, selling_list=None,
+        ),
+        dict(
+            is_buyer=True, is_seller=False, shopping_list=["FISH"] * 100, selling_list=None,
+        ),
+        dict(
+            is_buyer=True, is_seller=False, shopping_list=["BOAR"] * 100, selling_list=None,
+        ),
+        dict(
+            is_buyer=True, is_seller=False, shopping_list=["BOAR"] * 100, selling_list=None,
+        ),
+        dict(
+            is_buyer=True, is_seller=False, shopping_list=["BOAR"] * 100, selling_list=None,
+        ),
+    ]
+
+    network = main.list_to_network(node_list, num_traders=2, start_port=49153,)
+    main.run_network(network=network, run_time=60)
+    return
+
+def test_no_sellers_sync():
+    """
+    Test that no sellers results in every attempt to buy fails
+    Synchronous model, requests should reach the warehouse
+    """
+    node_list = [
+        dict(
+            is_buyer=True, is_seller=False, shopping_list=["BOAR"] * 100, selling_list=None,
+        ),
+        dict(
+            is_buyer=True, is_seller=False, shopping_list=["SALT"] * 100, selling_list=None,
+        ),
+        dict(
+            is_buyer=True, is_seller=False, shopping_list=["FISH"] * 100, selling_list=None,
+        ),
+        dict(
+            is_buyer=True, is_seller=False, shopping_list=["BOAR"] * 100, selling_list=None,
+        ),
+        dict(
+            is_buyer=True, is_seller=False, shopping_list=["BOAR"] * 100, selling_list=None,
+        ),
+        dict(
+            is_buyer=True, is_seller=False, shopping_list=["BOAR"] * 100, selling_list=None,
+        ),
+    ]
+
+    network = main.list_to_network(node_list, num_traders=2, start_port=49153, synchronous=True)
+    main.run_network(network=network, run_time=60)
+    return
+
+def test_no_buyers():
+    """
+    Test that no sellers results in the network consistently restocking items but no purchases occur
+    """
+    node_list = [
+        dict(
+            is_buyer=False, is_seller=True, shopping_list=["BOAR"] * 100, selling_list=None,
+        ),
+        dict(
+            is_buyer=False, is_seller=True, shopping_list=["SALT"] * 100, selling_list=None,
+        ),
+        dict(
+            is_buyer=False, is_seller=True, shopping_list=["FISH"] * 100, selling_list=None,
+        ),
+        dict(
+            is_buyer=False, is_seller=True, shopping_list=["BOAR"] * 100, selling_list=None,
+        ),
+        dict(
+            is_buyer=False, is_seller=True, shopping_list=["BOAR"] * 100, selling_list=None,
+        ),
+        dict(
+            is_buyer=True, is_seller=False, shopping_list=["BOAR"] * 100, selling_list=None,
+        ),
+    ]
+
+    network = main.list_to_network(node_list, num_traders=2, start_port=49153)
+    main.run_network(network=network, run_time=60)
+    return
+
+def test_15_nodes():
+    """
+    Test that a network with 15 nodes still continues to function as intended, have 3 nodes designated as traders
+    """
+    network = main.make_random_network(15, 49153, num_traders=3)
+    main.run_network(network=network, run_time=100)
+
+def test_fault_tolerance():
+    """
+    Set up system in a way where requests under fault tolerance are easily trackable
+    Verify that fault tolerance is correctly handled
+    """
+    network = main.make_random_network(6, 49153, num_traders=2, fault_tolerance=True)
+    main.run_network(network, run_time=100)
+
 
 
 if __name__ == "__main__":
-    test_correct_leaders_elected(num_nodes=10, num_traders=5)
+    # test_correct_leaders_elected(num_nodes=10, num_traders=5)
+    # test_successful_purchases()
+    # test_no_sellers_async()
+    # test_no_sellers_sync()
+    # test_no_buyers()
+    # test_15_nodes()
+    test_fault_tolerance()
 
 
