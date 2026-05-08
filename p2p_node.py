@@ -239,6 +239,7 @@ class P2PNode:
                     else:
                         print(
                             f"{datetime.now()}, {msg['uid']}, succeeded. Node {self.id} purchased {msg['quantity']} {msg['item']}\n", end="", file=self.output_file)
+            # Entered when the warehouse sends a reply indicating the restock went through.
             case enums.MsgType.RESTOCK_REPLY.name:
                 self.peer_restock_reply(msg)
                 self.locks["REPLICATED_LOCK"].acquire()
@@ -250,14 +251,18 @@ class P2PNode:
                     print(f"{datetime.now()}, {msg['uid']}, made by node {msg['peer_id']} succeeded. Inventory restocked with {msg['quantity']} {msg['item']}\n", end="", file=self.output_file)
                 if not self.is_leader:
                     self.remove_from_resend_log(msg["uid"])
+            # used to sync data if the caches get out of sync, rare to happen, only happens sometimes under fault tolerance
             case enums.MsgType.SYNC_DATA.name:
                 self.locks["REPLICATED_LOCK"].acquire()
                 self.replicated_totals = msg["totals"]
                 self.locks["REPLICATED_LOCK"].release()
+            # part of fault tolerance, leader sends a heartbeat to the other periodically
             case enums.MsgType.HEARTBEAT.name:
                 self.handle_heartbeat(msg)
+            # part of fault tolerance, processes the reply from the heartbeat message
             case enums.MsgType.HEARTBEAT_REPLY.name:
                 self.handle_heartbeat_reply(msg)
+            # part of fault tolerance, leader announces that other leader has gone down, received by peers
             case enums.MsgType.LEADER_DOWN.name:
                 self.handle_leader_removal(msg)
 
@@ -270,6 +275,7 @@ class P2PNode:
         Request made by peer when attempting to purchase an item
         """
         uid = uuid.uuid4()
+        # Either buy pre-defined item during initialization or pick a random item
         if self.shopping_list is not None and len(self.shopping_list) > 0:
             self.locks["SHOPPING_LIST"].acquire()
             item = self.shopping_list.pop()
@@ -294,10 +300,11 @@ class P2PNode:
             self.send_msg(outgoing_msg, chosen_trader)
             self.append_to_resend_log(uid, self.id, enums.MsgType.BUY.name, item, quantity)
         except:
-            # if we've entered here, one of our leaders has failed. Remove leader from leader set and pick another
+            # if we've entered here, one of our leaders has failed. Queue message for resending
             print(f"{datetime.now()}, {uid}, Node {self.id} failed to reach leader when purchasing. Queueing request to purchase {item}\n", end="", file=self.output_file)
             self.append_to_resend_log(uid, self.id, enums.MsgType.BUY.name, item, quantity)
         finally:
+            # in any case, adjust the next buy timestamp
             self.next_buy_ts = datetime.now() + timedelta(0, 2) #+ timedelta(0, 10)
         return
 
@@ -307,7 +314,7 @@ class P2PNode:
         Request made by peer when attempting to restock the warehouse
         """
         uid = uuid.uuid4()
-        # Either pick random item and quantity, or get them from the selling list
+        # Either pick random item for restock, or use items defined at initialization
         if self.selling_list is not None and len(self.selling_list) > 0:
             self.locks["SELLING_LIST"].acquire()
             item = self.selling_list.pop()
@@ -331,9 +338,12 @@ class P2PNode:
             self.send_msg(outgoing_msg, chosen_trader)
             self.append_to_resend_log(uid, self.id, enums.MsgType.RESTOCK.name, item, self.restock_qty)
         except:
+            # If we've entered here, the chosen leader was not reached (which happens when it goes down)
+            # message is queued  to be resent when a new leader announces itself
             print(f"{datetime.now()}, {uid}, Node {self.id} failed to reach leader when restocking. Queueing request to be resent.\n", end="", file=self.output_file)
             self.append_to_resend_log(uid, self.id, enums.MsgType.RESTOCK.name, item, self.restock_qty)
         finally:
+            #in any case, adjust the next restock timestamp
             self.next_restock_ts = datetime.now() + timedelta(0, 20) #+ timedelta(0, 20)
         return
 
@@ -341,18 +351,23 @@ class P2PNode:
         """
         To be called by leaders only, forwards the transaction request message to the warehouse
         """
-        # FIXME implement checking local cache for requests
         msg["passed_cache"] = True
         msg["peer_id"] = msg["sender"]
         msg["sender"] = self.id
         self.send_msg(msg, self.warehouse_port, True)
 
     def peer_buy_reply(self, msg:dict):
+        """
+        To be called by leaders only, forwards the successful buy to the peer that purchased it
+        """
         self.locks["REPLICATED_LOCK"].acquire()
         if not msg["print_message"]:
             if not msg["is_resend"]:
+                # adjust the local cache for eventual consistency
                 self.replicated_totals[msg["item"]] -= msg["quantity"]
         self.locks["REPLICATED_LOCK"].release()
+        # since buys and restocks are multicasted to all leaders for cache updates, only forward the successful buy to the
+        # original peer if it was the leader that originally sent the message to the warehouse
         if msg["is_original_leader"] or msg["print_message"]:
             peer_id = msg["peer_id"]
             msg["sender"] = self.id
@@ -371,6 +386,10 @@ class P2PNode:
             self.send_msg(msg, peer_id, False)
 
     def reject_purchase_insufficient_cache(self, msg:dict):
+        """
+        In the case that the cache indicates there are insufficient totals to sell to peers
+        send message back to the original peer indicating as such
+        """
         msg["quantity"] = 0
         peer = msg["sender"]
         msg["sender"] = self.id
@@ -406,6 +425,9 @@ class P2PNode:
         return
 
     def send_heartbeat_request(self):
+        """
+        Sends original heartbeat to other leader nodes
+        """
         for node_id in self.traders.keys():
             heartbeat_dict = dict(
                 type = enums.MsgType.HEARTBEAT.name,
@@ -418,6 +440,9 @@ class P2PNode:
         return
 
     def handle_heartbeat(self, msg:dict):
+        """
+        Processes heartbeat message and replies to leader indicating that it got the message
+        """
         reply_msg = dict(
             type = enums.MsgType.HEARTBEAT_REPLY.name,
             sender = self.id
@@ -428,9 +453,16 @@ class P2PNode:
             return
 
     def handle_heartbeat_reply(self, msg:dict):
+        """
+        Records that the other leader acknowledged this leader's heartbeat request
+        """
         self.heartbeat_confirmation[msg["sender"]] = True
 
     def send_leader_down(self, leaders:list):
+        """
+        Sent by a leader after enough time has passed between heartbeats, communicates that the leader has
+        gone down to the peers and the warehouse.
+        """
         msg = dict(
             type=enums.MsgType.LEADER_DOWN.name,
             sender = self.id,
@@ -444,12 +476,17 @@ class P2PNode:
         self.send_msg(msg, -1, True)
 
     def handle_leader_removal(self, msg:dict):
+        """
+        Called by peers when the remaining leader indicates that the other leader has gone down
+        """
         leaders = msg["leaders"]
         for leader in leaders:
+            # Remove down leader from local copy of leaders
             self.traders.pop(leader, -1)
             self.nodes.pop(leader, -1)
         self.locks["AVOID_SENDING_REQUESTS"].acquire()
         self.locks["RESEND_LOG_LOCK"].acquire()
+        # Send all queued requests from when the leader went down
         for i, request in self.resend_peer_log.iterrows():
             msg=dict(
                 uid=request["uid"],
@@ -459,10 +496,12 @@ class P2PNode:
                 quantity=request["quantity"]
             )
             try:
+                # Resend failed message to new leader
                 chosen_sent_leader = random.choice(list(self.traders.keys()))
                 print(f"{datetime.now()}, {msg['uid']}, Retrying request of type {msg['type']} for {msg['quantity']} {msg['item']}\n", end="", file=self.output_file)
                 self.send_msg(msg, chosen_sent_leader, False)
             except:
+                # Except block for defensive coding, should never enter here
                 continue
         self.locks["RESEND_LOG_LOCK"].release()
         self.locks["AVOID_SENDING_REQUESTS"].release()

@@ -158,16 +158,14 @@ def run_network(network: dict[int, p2p.P2PNode], run_time:int, stop_network:bool
 
 
 if __name__ == "__main__":
-    # num_nodes = int(sys.argv[1])
+    num_nodes = int(sys.argv[1])
+    num_traders = int(sys.argv[2])
 
-    # FIXME: remove debug statement
-    num_nodes = 6
-
-    # if type(num_nodes) is not int or num_nodes < 6:
-    #     print("please pass an integer greater than 5")
-    #     exit(1)
+    if type(num_nodes) is not int or num_nodes < 6:
+        print("please pass an integer greater than 5")
+        exit(1)
     start_port = 49153
-    network = make_random_network(num_nodes=num_nodes, start_port=start_port, num_traders=2, synchronous=False)
+    network = make_random_network(num_nodes=num_nodes, start_port=start_port, num_traders=num_traders, synchronous=False)
     run_network(network=network, run_time=100)
 
 
