@@ -7,6 +7,7 @@ import hw5_testing
 import p2p_node as p2p
 import main
 import warehouse_node
+from pathlib import Path
 
 
 def dict_to_network(node_dict: dict, warehouse_id: int, warehouse_port: int, num_traders: int, synchronous:bool, time_to_die:int):
@@ -203,10 +204,20 @@ def fault_analysis():
     print(post_stop_tput)
     return
 
-def calc_throughput():
-    # Read in and clean up data
+
+def read_data():
+    log_dir = Path.cwd() / "logs"
     columns = ["ts", "uid", "status"]
-    df = read_data(caching=True)
+    df_list = []
+    for lf in log_dir.glob("*.txt"):
+        df_list.append(pd.read_csv(lf, names=columns))
+    df = pd.concat(df_list)
+    df["ts"] = pd.to_datetime(df["ts"])
+    return df
+
+
+def calc_throughput():
+    df = read_data()
     # Calculate runtime
     runtime = (df["ts"].max() - df["ts"].min()).seconds
     # Calculate total items sold
@@ -219,34 +230,100 @@ def calc_throughput():
     print(f"Throughput: {throughput}")
     return
 
+def calc_oversell_rate():
+    df = read_data()
+    # Get df of just the oversells
+    failed_buy_mask = df["status"].str.contains("depleted")
+    passed_cache_mask = ~df["status"].str.contains("expected")
+    oversell_mask = failed_buy_mask & passed_cache_mask
+    oversell_df = df[oversell_mask]
+    # Get df of all starting purchases
+    start_buy_mask = df["status"].str.contains("is buying")
+    start_buy_df = df[start_buy_mask]
+    # Calculate oversell rates
+    oversell_rate = oversell_df.shape[0] / start_buy_df.shape[0]
+    print(f"Overselling rate is {oversell_rate}")
+    return
+
+def calc_fault_throughout():
+    # Read in data and sort by time
+    df = read_data()
+    df = df.sort_values("ts").reset_index(drop=True)
+    # get time of first and last (finished) transaction message
+    is_tx_mask = (df["uid"].str.len() == 37)
+    is_restock_finish = (df["status"].str.contains("restocked"))
+    is_buy_finish = (df["status"].str.contains("purchased"))
+    is_tx_finish = is_restock_finish | is_buy_finish
+    first_tx_time = df[is_tx_mask]["ts"].min()
+    last_tx_time = df[is_tx_mask & is_tx_finish]["ts"].min()
+    # mark whether each message ocurred before or after the node stopped
+    stopping_mask = df["status"].str.contains("stopping") | df["status"].str.contains("fault")
+    first_stop_ts = df[stopping_mask]["ts"].iloc[0]
+    df["before stop"] = np.where(df["ts"] < first_stop_ts,
+                                 True,
+                                 False)
+    # Calculate total seconds for each uid
+    df["uid start"] = df["uid"].map(df.groupby("uid")["ts"].min())
+    df["uid end"] = df["uid"].map(df.groupby("uid")["ts"].max())
+    df["uid turnaround"] = (df["uid end"] - df["uid start"]).dt.microseconds
+    # Keep only completed purchases
+    finished_purchase_mask = df["status"].str.contains("purchased")
+    df = df[finished_purchase_mask]
+    df["num items purchased"] = df["status"].apply(lambda x: x.split(" ")[-2])
+    # Graph distribution of microseconds per uid before and after the node shut down
+    fig = px.box(df, x="before stop", y="uid turnaround")
+    fig.update_layout(title="Microseconds Per Purchase")
+    fig.update_xaxes(title="Purchase finished before node stopped?")
+    fig.update_yaxes(title="Microseconds")
+    fig.show()
+    # Graph scatterplot of uids with x=ts, y=microseconds.
+    fig = px.scatter(df, x="ts", y="uid turnaround", title="Microseconds per BUY")
+    fig.add_vline(x=first_stop_ts)
+    fig.update_xaxes(title="Timestamp of BUY Ending")
+    fig.update_yaxes(title="Total Microseconds From Start to End of BUY")
+    fig.show()
+    # calculate throughputs
+    pre_stop_ms = (first_stop_ts - first_tx_time).microseconds
+    post_stop_ms = (last_tx_time - first_stop_ts).microseconds
+    pre_stop_s = (first_stop_ts - first_tx_time).seconds
+    post_stop_s = (last_tx_time - first_stop_ts).seconds
+    pre_stop_tput = df[df["before stop"]]["num items purchased"].astype(int).sum() / (pre_stop_s)
+    post_stop_tput = df[~df["before stop"]]["num items purchased"].astype(int).sum() / (post_stop_s)
+    print(f"Average throughput before trader stopped: {pre_stop_tput}")
+    print(f"Average throughput after trader stopped: {post_stop_tput}")
+    return
 
 
 if __name__ == "__main__":
-    experiment = 1
-    match experiment:
-        case 1:
+    metric_to_calc = 3
+    run_program = False
+
+    num_traders = 10
+    num_buyers = 10
+    num_sellers = 10
+    use_caching_version = True
+    time_to_die = 150
+    runtime = 300
+
+    if run_program:
             node_dict = {nid: dict(
                 port=49152+nid,
-                is_buyer=nid<=10, is_seller=nid>10,
+                is_buyer=nid<=num_buyers, is_seller=nid>num_buyers,
                 shopping_list=None, selling_list=None
-                ) for nid in range(1, 23)}
-            nodes = dict_to_network(node_dict=node_dict, warehouse_id=0, warehouse_port=49152, num_traders=2, synchronous=True, time_to_die=150)
-            main.run_network(nodes, run_time=300, stop_network=True)
-            calc_throughput()
-            nodes = dict_to_network(node_dict=node_dict, warehouse_id=0, warehouse_port=49152, num_traders=2, synchronous=False, time_to_die=150)
-            main.run_network(nodes, run_time=300, stop_network=True)
-            calc_throughput()
-        case 2:
-            pass
-        case 3:
-            pass
-        case 4:
-            pass
-    generate_output(caching=True)
-    
-    #warehouse_throughout()
-    #overselling_rate()
-    #fault_analysis()
+                ) for nid in range(1, num_buyers+num_sellers+num_traders+1)}
+            nodes = dict_to_network(node_dict=node_dict, warehouse_id=0, warehouse_port=49152,
+                                    num_traders=num_traders,
+                                    synchronous=not use_caching_version,
+                                    time_to_die=time_to_die)
+            main.run_network(nodes, run_time=runtime, stop_network=True)
+    else:
+        match metric_to_calc:
+            case 1:
+                calc_throughput()
+            case 2:
+                calc_oversell_rate()
+            case 3:
+                calc_fault_throughout()
 
 
 

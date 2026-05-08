@@ -124,7 +124,7 @@ def run_network(network: dict[int, p2p.P2PNode], run_time:int, stop_network:bool
     if not log_path.exists():
         log_path.mkdir(parents=True)
     else:
-        for csv in log_path.glob("csv"):
+        for csv in log_path.glob("*.txt"):
             csv.unlink()
 
     # Iterate through and start each node running in its own subprocess.
