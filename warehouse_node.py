@@ -153,6 +153,8 @@ class Warehouse:
                 self.handle_leader_removal(msg)
             case enums.ControlMsgType.STOP.name:
                 self.stop()
+            case "RESYNC_ME":
+                self.resync_totals()
             case _:
                 print("Invalid msg type sent to warehouse.")
                 raise Exception
@@ -171,7 +173,7 @@ class Warehouse:
 
     def handle_buy(self, msg:dict):
         """
-        On recieving a BUY, call this msg to handle it.
+        On recieving a BUY, call this fct to handle it.
         Checks BUY against how much inventory we have.
         Sells as much as possible, and sends a reply msg back.
         """

@@ -28,7 +28,7 @@ def test_correct_leaders_elected(num_nodes:int, num_traders:int):
 def test_successful_purchases():
     """
     Sets up a network where nodes want to purchase and sell salt and boar
-    Monitors to verify purchases are successful.
+    Monitor to verify purchases are successful.
     """
     node_list = [
             dict(
@@ -162,12 +162,21 @@ def test_fault_tolerance():
 
 
 if __name__ == "__main__":
-    # test_correct_leaders_elected(num_nodes=10, num_traders=5)
-    # test_successful_purchases()
-    # test_no_sellers_async()
-    # test_no_sellers_sync()
-    # test_no_buyers()
-    # test_15_nodes()
-    test_fault_tolerance()
+    test_case = 7
+    match test_case:
+        case 1:
+            test_correct_leaders_elected(num_nodes=10, num_traders=5)
+        case 2:
+            test_successful_purchases()
+        case 3:
+            test_no_sellers_async()
+        case 4:
+            test_no_sellers_sync()
+        case 5:
+            test_no_buyers()
+        case 6:
+            test_15_nodes()
+        case 7:
+            test_fault_tolerance()
 
 

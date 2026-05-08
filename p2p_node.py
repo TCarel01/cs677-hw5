@@ -53,6 +53,7 @@ class P2PNode:
         self.num_traders = num_traders
         # Needed for running logic
         self.running = None
+        self.listening = True
         self.tx_lock = None  # This lock is ONLY used when we change to self.tx. Should be locked for 1 line of code at a time.
         self.tx = list()
         # Needed for election logic
@@ -118,9 +119,10 @@ class P2PNode:
         self.locks["REPLICATED_LOCK"] = threading.Lock()
         self.locks["RESEND_LOG_LOCK"] = threading.Lock()
         self.locks["AVOID_SENDING_REQUESTS"] = threading.Lock()
+        self.locks["LISTENING"] = threading.Lock()
 
         # Start run loop (after waiting 5 seconds so all nodes are online)
-        time.sleep(5)
+        time.sleep(10)
         self.running = True
         self.run_loop()
         return
@@ -137,6 +139,13 @@ class P2PNode:
         time.sleep(5)
         return
     
+    def stop_listening(self):
+        #with self.locks["LISTENING"]:
+        self.listening = False
+        self.server_socket.close()
+        time.sleep(5)
+        return
+    
     def run_loop(self):
         """
         Three states the node can be in while running.
@@ -145,7 +154,9 @@ class P2PNode:
         Client: If the node if not a leader but we have enough leaders.
         """
         while self.running:
-            self.listen()
+            #with self.locks["LISTENING"]:
+            if self.listening:
+                self.listen()
             if self.is_electing:
                 self.election_logic()
             elif self.is_leader:
@@ -164,7 +175,7 @@ class P2PNode:
         # Open thread executor, and enter listening loop
         with ThreadPoolExecutor(max_workers=100) as executor:
             # We will continue this loop until there are no incoming messages.
-            while self.running and select.select([self.server_socket], [], [], 0.1)[0]:
+            while self.running and self.listening and select.select([self.server_socket], [], [], 0.1)[0]:
                 socket_connection, addr = self.server_socket.accept()
                 data = socket_connection.recv(4096)
                 socket_connection.close()
@@ -180,7 +191,8 @@ class P2PNode:
                 else:
                     executor.submit(self.handle_msg, msg)
                 if self.leader_time_to_die is not None and datetime.now() > self.leader_time_to_die:
-                    self.stop()
+                    print(f"{datetime.now()}, status, node {self.id} has simulated a fault\n", end="", flush=True)
+                    self.stop_listening()
         return
     
     def handle_msg(self, msg:dict):
@@ -537,7 +549,7 @@ class P2PNode:
         """
         Logic that leaders go through in run_loop.
         """
-        if datetime.now() > self.next_heartbeat_timestamp:
+        if datetime.now() > self.next_heartbeat_timestamp and self.listening:
             if all(value is True for value in self.heartbeat_confirmation.values()):
                 self.heartbeat_confirmation = {key: False for key in self.heartbeat_confirmation}
                 self.send_heartbeat_request()

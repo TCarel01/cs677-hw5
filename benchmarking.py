@@ -26,7 +26,7 @@ def dict_to_network(node_dict: dict, warehouse_id: int, warehouse_port: int, num
                         shopping_list=node_dict[nid]["shopping_list"],
                         selling_list=node_dict[nid]["selling_list"],
                         synchronized=synchronous,
-                        leader_time_to_die=(datetime.now() + timedelta(0, time_to_die) if nid == max(list(node_dict.keys())) else None)
+                        leader_time_to_die=(datetime.now() + timedelta(0, time_to_die) if ( nid == max(list(node_dict.keys())) and time_to_die > 0 ) else None)
                         )
         nodes[nid] = n
     wh_node = warehouse_node.Warehouse(id=warehouse_id,
@@ -97,20 +97,20 @@ def generate_output(caching):
             ),
         }
     #node_dict = {nid: dict(port=49152+nid, is_buyer=nid<=12, is_seller=nid>12, shopping_list=None, selling_list=None) for nid in range(1, 25)}
-    node_dict = {nid: dict(port=49152+nid, is_buyer=nid<=18, is_seller=nid>18, shopping_list=None, selling_list=None) for nid in range(1, 31)}
-    #node_dict = {nid: dict(port=49152+nid, is_buyer=nid<=15, is_seller=nid>15, shopping_list=None, selling_list=None) for nid in range(1, 26)}
+    #node_dict = {nid: dict(port=49152+nid, is_buyer=nid<=10, is_seller=nid>10, shopping_list=None, selling_list=None) for nid in range(1, 31)}
+    node_dict = {nid: dict(port=49152+nid, is_buyer=nid<=10, is_seller=nid>10, shopping_list=None, selling_list=None) for nid in range(1, 23)}
     #node_dict = {nid: dict(port=49152+nid, is_buyer=nid<=5, is_seller=nid>5, shopping_list=None, selling_list=None) for nid in range(1, 16)}
     num_buyers = len([n for n in node_dict.keys() if node_dict[n]["is_buyer"]])
     num_sellers = len([n for n in node_dict.keys() if node_dict[n]["is_seller"]])
     print(f"{datetime.now()}, test status, there are {num_buyers} buyers and {num_sellers} sellers")
-    nodes = dict_to_network(node_dict=node_dict, warehouse_id=0, warehouse_port=49152, num_traders=10, synchronous=not caching, time_to_die=150)
+    nodes = dict_to_network(node_dict=node_dict, warehouse_id=0, warehouse_port=49152, num_traders=2, synchronous=not caching, time_to_die=150)
     main.run_network(nodes, run_time=300, stop_network=True)
     return
 
 def read_data(caching:bool):
     columns = ["ts", "uid", "status"]
     if caching:
-        df = pd.read_csv("caching_output_fault_test_50_clients.csv", names=columns)
+        df = pd.read_csv("caching_output.csv", names=columns)
     else:
         df = pd.read_csv("non_caching_output.csv", names=columns)
     df["ts"] = pd.to_datetime(df["ts"])
@@ -167,7 +167,7 @@ def fault_analysis():
     first_tx_time = df[is_tx_mask]["ts"].min()
     last_tx_time = df[is_tx_mask & is_tx_finish]["ts"].min()
     # mark whether each message ocurred before or after the node stopped
-    stopping_mask = df["status"].str.contains("stopping")
+    stopping_mask = df["status"].str.contains("stopping") | df["status"].str.contains("fault")
     first_stop_ts = df[stopping_mask]["ts"].iloc[0]
     df["before stop"] = np.where(df["ts"] < first_stop_ts,
                                  True,

@@ -273,7 +273,9 @@ class TestNonCachingTrader(unittest.TestCase):
                                    item=item,
                                    quantity=quantity,
                                    peer_id=self.node_id,
-                                   passed_cache=True).to_dict()
+                                   passed_cache=True,
+                                   is_original_leader=True,
+                                   ).to_dict()
         send_msg(outgoing_msg, dest_port=self.trader_id)
         return
     
@@ -289,19 +291,27 @@ class TestNonCachingTrader(unittest.TestCase):
         )
         send_msg(msg, dest_port=self.trader_id)
     
+
     def test_buy_is_fwded(self):
-        # Test that a BUY request is forwarded
-        uid = uuid.uuid4()
-        self.node_send_msg(uid=uid, type=enums.MsgType.BUY.name, item=enums.Item.SALT.name, quantity=5)
-        reply_msg = recieve_msg(self.wh_socket)
-        expected_reply = dict(uid=uid,
-                              sender=self.trader_id,
-                              type=enums.MsgType.BUY.name,
-                              item=enums.Item.SALT.name,
-                              quantity=5,
-                              peer_id=self.node_id,
-                              passed_cache=True)
-        self.assertDictEqual(reply_msg, expected_reply)
+        # Test that a BUY request is forwarded in non caching version.
+        # If we're in caching version, we skip this test
+        if not self.synchronized:
+            print("test_buy_is_fwded only applies to non-caching version, so we skip it in caching version.")
+        else:
+            uid = uuid.uuid4()
+            self.node_send_msg(uid=uid, type=enums.MsgType.BUY.name, item=enums.Item.SALT.name, quantity=5)
+            reply_msg = recieve_msg(self.wh_socket)
+            expected_reply = dict(uid=uid,
+                                sender=self.trader_id,
+                                type=enums.MsgType.BUY.name,
+                                item=enums.Item.SALT.name,
+                                quantity=5,
+                                peer_id=self.node_id,
+                                passed_cache=True,
+                                is_resend=False,
+                                is_original_leader=False,
+                                print_message=False)
+            self.assertDictEqual(reply_msg, expected_reply)
         return
     
     def test_restock_is_fwded(self):
@@ -315,13 +325,16 @@ class TestNonCachingTrader(unittest.TestCase):
                               item=enums.Item.SALT.name,
                               quantity=5,
                               peer_id=self.node_id,
-                              passed_cache=True)
+                              passed_cache=True,
+                              is_original_leader=False,
+                              is_resend=False,
+                              print_message=False)
         self.assertDictEqual(reply_msg, expected_reply)
         return
     
     def test_reply_restock_is_forwarded(self):
-        print("Skipping reply fwd test, as currently, the script is set up such that replies to RESTOCKs are not fwded to sellers")
-        return
+        #print("Skipping reply fwd test, as currently, the script is set up such that replies to RESTOCKs are not fwded to sellers")
+        #return
         uid = uuid.uuid4()
         self.warehouse_send_msg(uid=uid, type=enums.MsgType.RESTOCK_REPLY.name, item=enums.Item.SALT.name, quantity=5)
         reply_msg = recieve_msg(self.node_socket)
@@ -331,7 +344,10 @@ class TestNonCachingTrader(unittest.TestCase):
                               item=enums.Item.SALT.name,
                               quantity=5,
                               peer_id=self.node_id,
-                              passed_cache=True)
+                              passed_cache=True,
+                              is_original_leader=True,
+                              is_resend=False,
+                              print_message=False)
         self.assertDictEqual(reply_msg, expected_reply)
 
     def test_reply_buy_is_forwarded(self):
@@ -344,11 +360,14 @@ class TestNonCachingTrader(unittest.TestCase):
                               item=enums.Item.SALT.name,
                               quantity=5,
                               peer_id=self.node_id,
-                              passed_cache=True)
+                              passed_cache=True,
+                              is_original_leader=True,
+                              is_resend=False,
+                              print_message=False)
         self.assertDictEqual(reply_msg, expected_reply)
     
 class TestCachingTrader(TestNonCachingTrader):
-    synchronized=False
+    synchronized = False
 
     def test_buy_not_fwded(self):
         # Test that a BUY request is not forwarded when the cache has that item at 0
@@ -371,7 +390,7 @@ if __name__ == "__main__":
     #unittest.main()
     warehouse_suite = unittest.TestLoader().loadTestsFromTestCase(TestWarehouse)
     caching_trader_suite = unittest.TestLoader().loadTestsFromTestCase(TestNonCachingTrader)
-    non_caching_trader_suite = unittest.TestLoader().loadTestsFromTestCase(TestNonCachingTrader)
+    non_caching_trader_suite = unittest.TestLoader().loadTestsFromTestCase(TestCachingTrader)
     #unittest.TextTestRunner().run(warehouse_suite)
     #unittest.TextTestRunner().run(non_caching_trader_suite)
     unittest.TextTestRunner().run(caching_trader_suite)
