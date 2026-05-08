@@ -38,27 +38,31 @@ class Warehouse:
         self.nodes = nodes
         self.server_socket = socket.socket()
         self.handled_uids = []
-        # stores ID in here whenever it receives a request from a leader, used for fault tolerance
+        # stores ID in here whenever it receives an IWON from a leader. Used for fault tolerance.
         self.leader_ids = set()
-        # Used to store and process incoming requests
-
+        # Used to keep track of requests in the case of fault tolerance.
         self.resend_warehouse_log = pd.DataFrame(
             columns=["uid", "sender", "type", "item", "quantity", "peer_id", "is_original_leader"])
-        # Quantities
+        # We'll store our locks in this dict.
         self.locks = dict()
+        # Keep track of item quantities
         self.inv = dict(
             SALT = 0,
             BOAR = 0,
             FISH = 0,
-            
         )
         self.next_sync_timestamp = datetime.now()
         self.responses = dict()
         return
     
     def start(self):
+        """
+        Called to start the warehouse running.
+        Opens log file, binds port to socket, sets up locks, and starts run loop.
+        """
+        # Open log file.
         self.output_file = open(f'logs/warehouse_log.txt', 'w')
-        # Start port
+        # Start socket
         self.server_socket = socket.socket()
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.server_socket.settimeout(100)  # Time out so we can gracefully exit once we stop seeing messages.
@@ -96,26 +100,25 @@ class Warehouse:
         with ThreadPoolExecutor(max_workers=100) as executor:
             # We will continue this loop until there are no incoming messages.
             while self.running and select.select([self.server_socket], [], [], 0.1)[0]:
+                # Get message
                 socket_connection, addr = self.server_socket.accept()
                 data = socket_connection.recv(4096)
                 socket_connection.close()
                 msg = pickle.loads(data)
                 if msg["type"] == enums.ControlMsgType.STOP.name:
+                    # If message is a stop, we stop and break out of loop.
                     self.stop()
                     break
                 else:
-                    #if msg["sender"] is not None and msg["sender"] not in self.leader_ids:
-                    #    self.leader_ids.add(msg["sender"])
+                    # Otherwise, spawn thread to handle msg.
                     executor.submit(self.handle_msg, msg)
-                # if datetime.now() > self.next_sync_timestamp and not self.synchronous:
-                #     self.resync_totals()
-
         return
 
     def resync_totals(self):
         """
         Method to explicitly resync all totals instead of just communicating updates, rarely used
         """
+        # Get latest copy of item totals.
         self.locks[enums.Item.SALT.name].acquire()
         self.locks[enums.Item.BOAR.name].acquire()
         self.locks[enums.Item.FISH.name].acquire()
@@ -123,10 +126,12 @@ class Warehouse:
         self.locks[enums.Item.SALT.name].release()
         self.locks[enums.Item.BOAR.name].release()
         self.locks[enums.Item.FISH.name].release()
+        # Create message
         msg = dict(
             type = enums.MsgType.SYNC_DATA.name,
             totals = totals_copy
         )
+        # Send message to all leaders
         cur_leader = -1
         try:
             for node_id in self.leader_ids:
@@ -134,6 +139,7 @@ class Warehouse:
                 self.send_msg(msg, node_id)
             self.next_sync_timestamp = datetime.now() + timedelta(0, 2)
         except:
+            # If we detect a leader is down, we log that and remove it from the leader list.
             print(f"{datetime.now()}, Leader {cur_leader} detected to be down when resyncing inventory. Removing leader {cur_leader} from potential leaders", file=self.output_file)
             self.leader_ids.remove(cur_leader)
     
@@ -171,6 +177,7 @@ class Warehouse:
         """
         On recieving a STOP msg, call this fct to shut down the warehouse.
         """
+        # Log that warehouse is shutting down, close teh socket, stop it running, and then close the output file.
         print(f"{datetime.now()}, warehouse, node {self.id} stopping", file=self.output_file)
         self.server_socket.close()
         self.running = False
@@ -184,6 +191,8 @@ class Warehouse:
         Checks BUY against how much inventory we have.
         Sells as much as possible, and sends a reply msg back.
         """
+        # If we've already seen this message, we don't want to process it twice.
+        # instead, grab the previous response and send that.
         if msg["uid"] in self.responses.keys():
             reply = self.responses[msg["uid"]]
             reply = enums.TxMsg(uid=reply["uid"],
@@ -195,16 +204,20 @@ class Warehouse:
                                     passed_cache=False,
                                     is_original_leader=True,
                                     is_resend=True).to_dict()
+            # Send response to a different leader, as we assume the original
+            # leader has gone down if we're getting a resend at all.
             dest = random.choice(list(self.leader_ids))
             self.send_msg(msg=reply, dest=dest)
+        # If we haven't see this request before, check if we can satisfy it, then reply.
         else:
             item = msg["item"]
             ordered = msg["quantity"]
-            # Lock attribute, update, and release.
+            # Lock item count, check how much we can sell, update item count, and release lock.
             with self.locks[item]:
                 in_store = self.inv[item]
                 sold = (ordered if in_store > ordered else in_store)
                 self.inv[item] -= sold
+            # Add this UID to list of handled msgs.
             self.handled_uids.append(msg["uid"])  # append is thread safe
             # Return msg
             reply = enums.TxMsg(uid=msg["uid"],
@@ -218,9 +231,12 @@ class Warehouse:
             self.locks["AVOID_SENDING_REQUESTS"].acquire()
             self.locks["AVOID_SENDING_REQUESTS"].release()
             for cur_leader_id in self.leader_ids:
-                # attempt to multicast update status to all nodes, different case needed for if
+                # attempt to multicast update status to all nodes (so they can update caches),
+                # different case needed for if
                 # sending to original leader or not so messages properly forwarded to correct peer
                 if cur_leader_id == msg["sender"]:
+                    # When sending to the leader who forwarded the msg, mark that
+                    # so they know to fully handle the reply
                     cur_reply = enums.TxMsg(uid=msg["uid"],
                             sender=self.id,
                             type=enums.MsgType.BUY_REPLY.name,
@@ -237,6 +253,8 @@ class Warehouse:
                                                 cur_reply["item"], cur_reply["quantity"], cur_reply["peer_id"],
                                                 cur_reply["is_original_leader"])
                 else:
+                    # When sending to a leader that did not originally fwd this msg,
+                    # mark that so they know to just update the cache.
                     try:
                         self.send_msg(reply, cur_leader_id)
                     except:
@@ -250,6 +268,8 @@ class Warehouse:
         Called on receiving a RESTOCK msg.
         Adds items to inventory.
         """
+        # If we've already seen this message, we don't want to process it twice.
+        # instead, grab the previous response and send that.
         if msg["uid"] in self.responses.keys():
             reply = self.responses[msg["uid"]]
             reply = enums.TxMsg(uid=reply["uid"],
@@ -261,14 +281,18 @@ class Warehouse:
                                     passed_cache=False,
                                     is_original_leader=True,
                                     is_resend=True).to_dict()
+            # Send response to a different leader, as we assume the original
+            # leader has gone down if we're getting a resend at all.
             dest = random.choice(list(self.leader_ids))
             self.send_msg(msg=reply, dest=dest)
+        # If we haven't see this request before, check if we can satisfy it, then reply.
         else:
             item = msg["item"]
             stocked = msg["quantity"]
             # Lock attribute, update, and release.
             with self.locks[item]:
                 self.inv[item] += stocked
+            # Add this tx to list of seen tx so we don't process it twice
             self.handled_uids.append(msg["uid"])  # append is thread safe
             # Return msg
             reply = enums.TxMsg(uid=msg["uid"],
@@ -281,7 +305,10 @@ class Warehouse:
 
             self.locks["AVOID_SENDING_REQUESTS"].acquire()
             self.locks["AVOID_SENDING_REQUESTS"].release()
+            # Send msg to all leader so they can updatre their cache.
             for cur_leader_id in self.leader_ids:
+                    # When sending to the leader who forwarded the msg, mark that
+                    # so they know to fully handle the reply
                     if cur_leader_id == msg["sender"]:
                         cur_reply = enums.TxMsg(uid=msg["uid"],
                                                 sender=self.id,
@@ -298,6 +325,8 @@ class Warehouse:
                                                     cur_reply["item"], cur_reply["quantity"], cur_reply["peer_id"],
                                                     cur_reply["is_original_leader"])
                     else:
+                        # When sending to a leader that did not originally fwd this msg,
+                        # mark that so they know to just update the cache.
                         try:
                             self.send_msg(reply, cur_leader_id)
                         except:
@@ -310,12 +339,14 @@ class Warehouse:
         Called on receiving a remove leader message from the remaining leader node.
         Removes leader from local leader list and retries all queued messages
         """
+        # Remove leader from warehouse's list of leaders
         leaders = msg["leaders"]
         for leader in leaders:
             self.leader_ids.discard(leader)
             self.nodes.pop(leader, -1)
         self.locks["AVOID_SENDING_REQUESTS"].acquire()
         self.locks["RESEND_LOG_LOCK"].acquire()
+        # Resend all messages that need to be resent after a leader has failed.
         for i, request in self.resend_warehouse_log.iterrows():
             msg=dict(
                 uid=request["uid"],
@@ -335,6 +366,7 @@ class Warehouse:
                     self.send_msg(msg, chosen_sent_leader)
                 except:
                     continue
+        # Remove resent messages from list of messages to resend.
         self.resend_warehouse_log.drop(self.resend_warehouse_log.index)
         self.locks["RESEND_LOG_LOCK"].release()
         self.locks["AVOID_SENDING_REQUESTS"].release()
