@@ -113,6 +113,9 @@ class Warehouse:
         return
 
     def resync_totals(self):
+        """
+        Method to explicitly resync all totals instead of just communicating updates, rarely used
+        """
         self.locks[enums.Item.SALT.name].acquire()
         self.locks[enums.Item.BOAR.name].acquire()
         self.locks[enums.Item.FISH.name].acquire()
@@ -215,6 +218,8 @@ class Warehouse:
             self.locks["AVOID_SENDING_REQUESTS"].acquire()
             self.locks["AVOID_SENDING_REQUESTS"].release()
             for cur_leader_id in self.leader_ids:
+                # attempt to multicast update status to all nodes, different case needed for if
+                # sending to original leader or not so messages properly forwarded to correct peer
                 if cur_leader_id == msg["sender"]:
                     cur_reply = enums.TxMsg(uid=msg["uid"],
                             sender=self.id,
@@ -301,6 +306,10 @@ class Warehouse:
         return
 
     def handle_leader_removal(self, msg:dict):
+        """
+        Called on receiving a remove leader message from the remaining leader node.
+        Removes leader from local leader list and retries all queued messages
+        """
         leaders = msg["leaders"]
         for leader in leaders:
             self.leader_ids.discard(leader)
