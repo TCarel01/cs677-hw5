@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from multiprocessing import Process
 import threading
 import enums
+import shutil
 
 import p2p_node as p2p
 import warnings
@@ -119,6 +120,13 @@ def run_network(network: dict[int, p2p.P2PNode], run_time:int, stop_network:bool
     stop_network dictates whether we stop the network after a certain amount of time,
     and run_time dictates how long that time is.
     """
+    log_path = Path.cwd() / Path("logs")
+    if not log_path.exists():
+        log_path.mkdir(parents=True)
+    else:
+        for csv in log_path.glob("csv"):
+            csv.unlink()
+
     # Iterate through and start each node running in its own subprocess.
     process_list = []
     for nid in network.keys():
