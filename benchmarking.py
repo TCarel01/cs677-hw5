@@ -170,8 +170,8 @@ if __name__ == "__main__":
     num_traders = 10
     num_buyers = 10
     num_sellers = 10
-    use_caching_version = True
-    time_to_die = 150
+    use_caching_version = False
+    time_to_die = 0
     runtime = 300
     # Run the program. Output will be saved to the logs folder.
     if run_program:
