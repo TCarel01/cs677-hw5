@@ -33,6 +33,7 @@ class Warehouse:
         self.port_number = port
         self.running = False
         self.synchronous = synchronous
+        self.output_file = None
         # Set up objects for communication
         self.nodes = nodes
         self.server_socket = socket.socket()
@@ -56,6 +57,7 @@ class Warehouse:
         return
     
     def start(self):
+        self.output_file = open(f'logs/warehouse_log.txt', 'w')
         # Start port
         self.server_socket = socket.socket()
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -73,7 +75,7 @@ class Warehouse:
         )
         # Start running
         self.running = True
-        print(f"{datetime.now()}, warehouse, node {self.id} start on port {self.port_number}")
+        print(f"{datetime.now()}, warehouse, node {self.id} start on port {self.port_number}", file=self.output_file)
         self.run_loop()
         return
     
@@ -129,7 +131,7 @@ class Warehouse:
                 self.send_msg(msg, node_id)
             self.next_sync_timestamp = datetime.now() + timedelta(0, 2)
         except:
-            print(f"{datetime.now()}, Leader {cur_leader} detected to be down when resyncing inventory. Removing leader {cur_leader} from potential leaders")
+            print(f"{datetime.now()}, Leader {cur_leader} detected to be down when resyncing inventory. Removing leader {cur_leader} from potential leaders", file=self.output_file)
             self.leader_ids.remove(cur_leader)
     
     def handle_msg(self, msg):
@@ -148,7 +150,7 @@ class Warehouse:
             case enums.ElecMsgType.IWON.name:
                 self.leader_ids.add(msg["sender"])
                 leader_str = ' + '.join([str(i) for i in list(self.leader_ids)])
-                print(f"{datetime.now()}, election, warehouse sees traders {leader_str}")
+                print(f"{datetime.now()}, election, warehouse sees traders {leader_str}", file=self.output_file)
             case enums.MsgType.LEADER_DOWN.name:
                 self.handle_leader_removal(msg)
             case enums.ControlMsgType.STOP.name:
@@ -166,9 +168,11 @@ class Warehouse:
         """
         On recieving a STOP msg, call this fct to shut down the warehouse.
         """
-        print(f"{datetime.now()}, warehouse, node {self.id} stopping")
+        print(f"{datetime.now()}, warehouse, node {self.id} stopping", file=self.output_file)
         self.server_socket.close()
         self.running = False
+        time.sleep(20)
+        self.output_file.close()
         return
 
     def handle_buy(self, msg:dict):
@@ -318,7 +322,7 @@ class Warehouse:
                     msg["is_original_leader"] = False
                     msg["print_message"] = True
                     chosen_sent_leader = random.choice(list(self.leader_ids))
-                    print(f"{datetime.now()}, {msg['uid']}, Resending response from warehouse of type {msg['type']} for {msg['quantity']} {msg['item']}")
+                    print(f"{datetime.now()}, {msg['uid']}, Resending response from warehouse of type {msg['type']} for {msg['quantity']} {msg['item']}", file=self.output_file)
                     self.send_msg(msg, chosen_sent_leader)
                 except:
                     continue

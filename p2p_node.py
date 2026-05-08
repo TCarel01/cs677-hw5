@@ -51,6 +51,7 @@ class P2PNode:
         self.port_number = port_number
         self.server_socket = socket.socket()
         self.num_traders = num_traders
+        self.output_file = None
         # Needed for running logic
         self.running = None
         self.listening = True
@@ -104,7 +105,8 @@ class P2PNode:
         Called by parent process to start node running.
         Sets self.running to True, sets up socket, and starts run loop.
         """
-        print(f"{datetime.now()}, status, node {self.id} starting using port {self.port_number}\n", end="")
+        self.output_file = open(f'logs/node_{self.id}_log.txt', 'w')
+        print(f"{datetime.now()}, status, node {self.id} starting using port {self.port_number}\n", end="", file=self.output_file)
         # Set up server socket
         self.server_socket = socket.socket()
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -120,7 +122,6 @@ class P2PNode:
         self.locks["RESEND_LOG_LOCK"] = threading.Lock()
         self.locks["AVOID_SENDING_REQUESTS"] = threading.Lock()
         self.locks["LISTENING"] = threading.Lock()
-
         # Start run loop (after waiting 5 seconds so all nodes are online)
         time.sleep(10)
         self.running = True
@@ -133,17 +134,19 @@ class P2PNode:
         Sets self.running to False, which will end our run loop.
         Closes server socket.
         """
-        print(f"{datetime.now()}, status, node {self.id} stopping\n", end="")
+        print(f"{datetime.now()}, status, node {self.id} stopping\n", end="", file=self.output_file)
         self.running = False
         self.server_socket.close()
-        time.sleep(5)
+        time.sleep(20)
+        self.output_file.close()
         return
     
     def stop_listening(self):
         #with self.locks["LISTENING"]:
         self.listening = False
         self.server_socket.close()
-        time.sleep(5)
+        time.sleep(20)
+        self.output_file.close()
         return
     
     def run_loop(self):
@@ -191,7 +194,7 @@ class P2PNode:
                 else:
                     executor.submit(self.handle_msg, msg)
                 if self.leader_time_to_die is not None and datetime.now() > self.leader_time_to_die:
-                    print(f"{datetime.now()}, status, node {self.id} has simulated a fault\n", end="", flush=True)
+                    print(f"{datetime.now()}, status, node {self.id} has simulated a fault\n", end="", flush=True, file=self.output_file)
                     self.stop_listening()
         return
     
@@ -229,13 +232,13 @@ class P2PNode:
                     self.remove_from_resend_log(msg["uid"])
                     if msg["quantity"] == 0:
                         if msg["passed_cache"]:
-                            print(f"{datetime.now()}, {msg['uid']}, made by node {self.id} to buy {msg['item']} failed. Inventory for {msg['item']} depleted.\n", end="")
+                            print(f"{datetime.now()}, {msg['uid']}, made by node {self.id} to buy {msg['item']} failed. Inventory for {msg['item']} depleted.\n", end="", file=self.output_file)
                         else:
                             print(
-                                f"{datetime.now()}, {msg['uid']}, made by node {self.id} to buy {msg['item']} failed. Inventory for {msg['item']} expected to be depleted.\n", end="")
+                                f"{datetime.now()}, {msg['uid']}, made by node {self.id} to buy {msg['item']} failed. Inventory for {msg['item']} expected to be depleted.\n", end="", file=self.output_file)
                     else:
                         print(
-                            f"{datetime.now()}, {msg['uid']}, succeeded. Node {self.id} purchased {msg['quantity']} {msg['item']}\n", end="")
+                            f"{datetime.now()}, {msg['uid']}, succeeded. Node {self.id} purchased {msg['quantity']} {msg['item']}\n", end="", file=self.output_file)
             case enums.MsgType.RESTOCK_REPLY.name:
                 self.peer_restock_reply(msg)
                 self.locks["REPLICATED_LOCK"].acquire()
@@ -244,7 +247,7 @@ class P2PNode:
                     self.num_restocks[msg["item"]] += 1
                 self.locks["REPLICATED_LOCK"].release()
                 if msg["is_original_leader"]:
-                    print(f"{datetime.now()}, {msg['uid']}, made by node {msg['peer_id']} succeeded. Inventory restocked with {msg['quantity']} {msg['item']}\n", end="")
+                    print(f"{datetime.now()}, {msg['uid']}, made by node {msg['peer_id']} succeeded. Inventory restocked with {msg['quantity']} {msg['item']}\n", end="", file=self.output_file)
                 if not self.is_leader:
                     self.remove_from_resend_log(msg["uid"])
             case enums.MsgType.SYNC_DATA.name:
@@ -276,7 +279,7 @@ class P2PNode:
             item = random.choice(list(enums.Item)).name
             quantity = random.choice(range(1, 10))
 
-        print(f"{datetime.now()}, {uid}, node {self.id} is buying {item}\n", end="")
+        print(f"{datetime.now()}, {uid}, node {self.id} is buying {item}\n", end="", file=self.output_file)
         outgoing_msg = enums.TxMsg(uid=uid,
                                    sender=self.id,
                                    type=enums.MsgType.BUY.name,
@@ -292,7 +295,7 @@ class P2PNode:
             self.append_to_resend_log(uid, self.id, enums.MsgType.BUY.name, item, quantity)
         except:
             # if we've entered here, one of our leaders has failed. Remove leader from leader set and pick another
-            print(f"{datetime.now()}, {uid}, Node {self.id} failed to reach leader when purchasing. Queueing request to purchase {item}\n", end="")
+            print(f"{datetime.now()}, {uid}, Node {self.id} failed to reach leader when purchasing. Queueing request to purchase {item}\n", end="", file=self.output_file)
             self.append_to_resend_log(uid, self.id, enums.MsgType.BUY.name, item, quantity)
         finally:
             self.next_buy_ts = datetime.now() + timedelta(0, 2) #+ timedelta(0, 10)
@@ -311,7 +314,7 @@ class P2PNode:
             self.locks["SELLING_LIST"].release()
         else:
             item = random.choice(list(enums.Item)).name
-        print(f"{datetime.now()}, {uid}, node {self.id} is restocking {item}\n", end="")
+        print(f"{datetime.now()}, {uid}, node {self.id} is restocking {item}\n", end="", file=self.output_file)
 
         # Send request to the warehouse node
         outgoing_msg = enums.TxMsg(uid=uid,
@@ -328,7 +331,7 @@ class P2PNode:
             self.send_msg(outgoing_msg, chosen_trader)
             self.append_to_resend_log(uid, self.id, enums.MsgType.RESTOCK.name, item, self.restock_qty)
         except:
-            print(f"{datetime.now()}, {uid}, Node {self.id} failed to reach leader when restocking. Queueing request to be resent.\n", end="")
+            print(f"{datetime.now()}, {uid}, Node {self.id} failed to reach leader when restocking. Queueing request to be resent.\n", end="", file=self.output_file)
             self.append_to_resend_log(uid, self.id, enums.MsgType.RESTOCK.name, item, self.restock_qty)
         finally:
             self.next_restock_ts = datetime.now() + timedelta(0, 20) #+ timedelta(0, 20)
@@ -457,7 +460,7 @@ class P2PNode:
             )
             try:
                 chosen_sent_leader = random.choice(list(self.traders.keys()))
-                print(f"{datetime.now()}, {msg['uid']}, Retrying request of type {msg['type']} for {msg['quantity']} {msg['item']}\n", end="")
+                print(f"{datetime.now()}, {msg['uid']}, Retrying request of type {msg['type']} for {msg['quantity']} {msg['item']}\n", end="", file=self.output_file)
                 self.send_msg(msg, chosen_sent_leader, False)
             except:
                 continue
@@ -492,7 +495,7 @@ class P2PNode:
         """
         Send out iwon message.
         """
-        print(f"{datetime.now()}, election, node {self.id} won election in epoch {self.election_epoch}\n", end="")
+        print(f"{datetime.now()}, election, node {self.id} won election in epoch {self.election_epoch}\n", end="", file=self.output_file)
         uid = uuid.uuid4()
         msg = enums.ElectMsg(uid=uid, sender=self.id, type=enums.ElecMsgType.IWON.name, epoch=self.election_epoch)
         self.election_epoch += 1
@@ -508,7 +511,7 @@ class P2PNode:
         """
         Send out elect msgs.
         """
-        print(f"{datetime.now()}, election, node {self.id} starting election in epoch {self.election_epoch}\n", end="")
+        print(f"{datetime.now()}, election, node {self.id} starting election in epoch {self.election_epoch}\n", end="", file=self.output_file)
         uid = uuid.uuid4()
         msg = enums.ElectMsg(uid=uid, sender=self.id, type=enums.ElecMsgType.ELECT.name, epoch=self.election_epoch).to_dict()
         for nid in self.nodes.keys():

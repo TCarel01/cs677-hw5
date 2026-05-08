@@ -203,13 +203,50 @@ def fault_analysis():
     print(post_stop_tput)
     return
 
+def calc_throughput():
+    # Read in and clean up data
+    columns = ["ts", "uid", "status"]
+    df = read_data(caching=True)
+    # Calculate runtime
+    runtime = (df["ts"].max() - df["ts"].min()).seconds
+    # Calculate total items sold
+    df["completed purchase"] = df["status"].str.contains("purchased")
+    df = df[df["completed purchase"]]
+    df["quantity"] = df["status"].str.split().str.slice(-2, -1).apply(lambda x: x[0]).astype(int)
+    total = df["quantity"].sum()
+    # Calculate throughput (items sold per seconds)
+    throughput = total / runtime
+    print(f"Throughput: {throughput}")
+    return
+
+
 
 if __name__ == "__main__":
-    #generate_output(caching=True)
+    experiment = 1
+    match experiment:
+        case 1:
+            node_dict = {nid: dict(
+                port=49152+nid,
+                is_buyer=nid<=10, is_seller=nid>10,
+                shopping_list=None, selling_list=None
+                ) for nid in range(1, 23)}
+            nodes = dict_to_network(node_dict=node_dict, warehouse_id=0, warehouse_port=49152, num_traders=2, synchronous=True, time_to_die=150)
+            main.run_network(nodes, run_time=300, stop_network=True)
+            calc_throughput()
+            nodes = dict_to_network(node_dict=node_dict, warehouse_id=0, warehouse_port=49152, num_traders=2, synchronous=False, time_to_die=150)
+            main.run_network(nodes, run_time=300, stop_network=True)
+            calc_throughput()
+        case 2:
+            pass
+        case 3:
+            pass
+        case 4:
+            pass
+    generate_output(caching=True)
     
     #warehouse_throughout()
     #overselling_rate()
-    fault_analysis()
+    #fault_analysis()
 
 
 

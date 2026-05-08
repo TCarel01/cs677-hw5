@@ -160,7 +160,7 @@ if __name__ == "__main__":
     #     exit(1)
     start_port = 49153
     network = make_random_network(num_nodes=num_nodes, start_port=start_port, num_traders=2, synchronous=False)
-    run_network(network=network, run_time=300)
+    run_network(network=network, run_time=100)
 
 
 
