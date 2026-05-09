@@ -53,8 +53,15 @@ class ActionStatus(Enum):
 
 
 class TxMsg:
+    """
+    This class is used to generate transaction MSGs, such that we can standardize
+    message inputs.
+    """
     def __init__(self, uid, sender: int, type: str, item: str, quantity: int,
                  peer_id:int | None=None, passed_cache:bool=False, is_original_leader:bool=False, print_message:bool=False, is_resend:bool=False):
+        """
+        Generate object with all parameters that go into message.
+        """
         self.uid = uid
         self.sender = sender
         self.type = type
@@ -68,6 +75,9 @@ class TxMsg:
         self.is_resend = is_resend
 
     def to_dict(self) -> dict:
+        """
+        Convert message to a standard dict for better pickling.
+        """
         d = dict(
             uid = self.uid,
             sender = self.sender,
@@ -83,17 +93,30 @@ class TxMsg:
         return d
     
     def mark_done(self) -> Self:
+        """
+        Mark message as done. This is not used in final implementation.
+        """
         self.is_done = True
         return self
 
 class ElectMsg:
+    """
+    This class is used to generate transaction MSGs, such that we can standardize
+    message inputs.
+    """
     def __init__(self, uid, sender: int, type: str, epoch: int):
+        """
+        Generate object with all parameters that go into message.
+        """
         self.sender = sender
         self.uid = uid
         self.type = type
         self.epoch = epoch
 
     def to_dict(self) -> dict:
+        """
+        Convert message to a standard dict for better pickling.
+        """
         d = dict(
             sender = self.sender,
             uid = self.uid,
