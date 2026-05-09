@@ -125,7 +125,7 @@ def calc_fault_throughout():
     # Find where the node simulated a fault. If no fault is found, we'll skip this analysis
     stopping_mask = df["status"].str.contains("fault")
     if stopping_mask.sum() == 0:
-        pass
+        print("No simulated fault detected in output, so no fault metrics calculated.")
     else:
         first_stop_ts = df[stopping_mask]["ts"].iloc[0]
         df["before stop"] = np.where(df["ts"] < first_stop_ts,
@@ -165,7 +165,7 @@ def calc_fault_throughout():
 
 if __name__ == "__main__":
     # Decide whether to run the network (run_program = True) or benchmarking (run_program = False)
-    run_program = False
+    run_network = False
     # Configure parameters for running the network.
     num_traders = 10
     num_buyers = 10
@@ -174,7 +174,7 @@ if __name__ == "__main__":
     time_to_die = 0
     runtime = 300
     # Run the program. Output will be saved to the logs folder.
-    if run_program:
+    if run_network:
             # Define desired node network via a dict, and
             # then convert that to a list of nodes.
             node_dict = {nid: dict(

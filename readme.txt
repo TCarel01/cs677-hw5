@@ -6,6 +6,7 @@ To run the main program,
 one need only run “python main.py {number of total peer nodes} {number of leaders}”
 where brackets and their contents are replaced with desired values,
 and with the needed dependencies (pandas) installed.
+Note that specifying number of leaders means that N_T is configurable.
 
 To run the benchmarking script,
 run "python benchmarking.py"
