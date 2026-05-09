@@ -167,11 +167,11 @@ if __name__ == "__main__":
     # Decide whether to run the network (run_program = True) or benchmarking (run_program = False)
     run_network = False
     # Configure parameters for running the network.
-    num_traders = 10
+    num_traders = 2
     num_buyers = 10
     num_sellers = 10
     use_caching_version = False
-    time_to_die = 0
+    time_to_die = 150
     runtime = 300
     # Run the program. Output will be saved to the logs folder.
     if run_network:

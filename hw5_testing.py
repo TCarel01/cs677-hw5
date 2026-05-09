@@ -162,7 +162,7 @@ def test_fault_tolerance():
 
 
 if __name__ == "__main__":
-    test_case = 7
+    test_case = 1
     match test_case:
         case 1:
             test_correct_leaders_elected(num_nodes=10, num_traders=5)
